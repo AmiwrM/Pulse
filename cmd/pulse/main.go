@@ -15,7 +15,7 @@ import (
 	"pulse/internal/app"
 )
 
-var version = "1.4.0"
+var version = "1.4.1"
 
 func main() {
 	if handleManagementCLI(os.Args[1:]) {
@@ -30,7 +30,7 @@ func main() {
 		serverURL = flag.String("server", env("PULSE_SERVER", ""), "master base URL (agent mode)")
 		token     = flag.String("token", env("PULSE_TOKEN", ""), "agent token (agent mode)")
 		agentName = flag.String("name", env("PULSE_AGENT_NAME", ""), "agent display name")
-		interval  = flag.Duration("interval", 5*time.Second, "agent report interval")
+		interval  = flag.Duration("interval", time.Second, "agent report interval")
 		services  = flag.String("services", env("PULSE_AGENT_SERVICES", ""), "comma separated systemd services to monitor")
 		collectWG = flag.Bool("wg", envBool("PULSE_AGENT_WG", true), "collect WireGuard handshake data")
 		once      = flag.Bool("once", false, "send a single report and exit (agent mode)")

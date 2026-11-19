@@ -29,7 +29,7 @@ func (a *App) handleAgentHello(w http.ResponseWriter, r *http.Request) {
 		},
 		"server_version":      a.cfg.Version,
 		"protocol_version":    2,
-		"report_interval_sec": 5,
+		"report_interval_sec": 1,
 		"offline_after_sec":   conf.AgentOfflineAfterSec,
 		"server_time":         nowUnix(),
 	})
@@ -85,7 +85,7 @@ func (a *App) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	server := a.publicBase(r)
 	conf := a.config()
 	downloadURL := conf.AgentDownloadURL
-	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 5s",
+	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 1s",
 		shellQuote(server), shellQuote(token), shellQuote(body.Name))
 	installCommand := agentInstallCommand(server, token, body.Name)
 	unit := agentUnit(server, token, body.Name)
@@ -116,7 +116,7 @@ func (a *App) handleRotateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server := a.publicBase(r)
-	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 5s",
+	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 1s",
 		shellQuote(server), shellQuote(token), shellQuote(ag.Name))
 	a.db.AddAudit("admin", "agent.rotate", ag.Name)
 	writeData(w, map[string]any{
@@ -211,7 +211,7 @@ const agentInstallerURL = "https://raw.githubusercontent.com/AmiwrM/Pulse/main/d
 func agentInstallCommand(server, token, name string) string {
 	return "curl -fsSL " + shellQuote(agentInstallerURL) + " | sudo bash -s -- " +
 		"--server " + shellQuote(server) + " --token " + shellQuote(token) +
-		" --name " + shellQuote(name) + " --interval 5s"
+		" --name " + shellQuote(name) + " --interval 1s"
 }
 
 func downloadCommand(url string) string {
@@ -231,7 +231,7 @@ Wants=network-online.target
 Type=simple
 User=root
 # برای پایش سرویس‌ها، --services "xray,wireguard" را به ExecStart اضافه کنید.
-ExecStart=/usr/local/bin/pulse --agent --server %s --token %s --name %s --interval 5s --wg
+ExecStart=/usr/local/bin/pulse --agent --server %s --token %s --name %s --interval 1s --wg
 Restart=always
 RestartSec=5
 TimeoutStopSec=20

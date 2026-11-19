@@ -11,7 +11,7 @@ import (
 
 func (a *App) scheduler(ctx context.Context) {
 	monitorTicker := time.NewTicker(2 * time.Second)
-	agentTicker := time.NewTicker(20 * time.Second)
+	agentTicker := time.NewTicker(5 * time.Second)
 	houseTicker := time.NewTicker(time.Hour)
 	defer monitorTicker.Stop()
 	defer agentTicker.Stop()
@@ -252,7 +252,7 @@ func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	ag.WireGuard = report.WireGuard
 
 	a.hub.broadcast("agent.updated", map[string]any{
-		"agent_id": ag.ID, "name": ag.Name, "hostname": ag.Hostname, "os": ag.OS,
+		"agent_id": ag.ID, "name": ag.Name, "hostname": ag.Hostname, "os": ag.OS, "ip": ag.IP,
 		"cpu": ag.CPUPct, "ram": ag.RAMPct, "disk": ag.DiskPct, "load1": ag.Load1,
 		"net_rx_bps": ag.NetRx, "net_tx_bps": ag.NetTx, "ram_total": ag.RAMTotal,
 		"disk_total": ag.DiskTotal, "version": ag.Version, "last_seen": ag.LastSeen,

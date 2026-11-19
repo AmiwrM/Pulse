@@ -1,10 +1,19 @@
 # Changelog
 
+## 1.4.1
+
+- Agent live reports now default to **1 second**; server cards update in place
+  over SSE with no full page re-render or visible flicker.
+- Metric history is sampled every 10 seconds to keep the database light.
+- UI bug fixes: stable agent-card patching, live page-summary counts, light-theme
+  primary buttons, softer/larger halos, no halo clipping behind agent cards,
+  theme-aware charts and better mobile/topbar spacing.
+- Version bump so `pulse update` on 1.4.0 can install the fresh binary.
+
 ## 1.4.0
 
 - Version bump and new release so `pulse update` on 1.3.x installs a fresh binary.
-- Agent reports now default to a 5-second interval; server cards update live
-  over SSE without waiting for a full page/API refresh.
+- Agent reports default to a 5-second interval; server cards update live over SSE.
 - Persistent light/dark theme toggle (stored in the browser).
 - Refined icon set, softer larger halos, layered shadows, removed halo clipping
   behind cards, improved light-theme contrast and gauges/charts.

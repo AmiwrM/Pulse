@@ -150,9 +150,18 @@ func (s *Store) RecordAgentReport(id int64, r model.AgentReport) error {
 		r.NetRx, r.NetTx, r.RAMTotal, r.DiskTotal, string(r.Services), string(r.WireGuard), id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO agent_metrics(agent_id,at,cpu,ram,disk,load1,net_rx_bps,net_tx_bps)
-		VALUES(?,?,?,?,?,?,?,?)`, id, now, r.CPUPct, r.RAMPct, r.DiskPct, r.Load1, r.NetRx, r.NetTx); err != nil {
+	// The agent sends a live REST report every second so the panel can update
+	// immediately, but history is sampled at a coarser resolution to keep
+	// agent_metrics compact and charts cheap to query.
+	var lastMetric int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(at),0) FROM agent_metrics WHERE agent_id=?`, id).Scan(&lastMetric); err != nil {
 		return err
+	}
+	if now-lastMetric >= 10 {
+		if _, err := tx.Exec(`INSERT INTO agent_metrics(agent_id,at,cpu,ram,disk,load1,net_rx_bps,net_tx_bps)
+			VALUES(?,?,?,?,?,?,?,?)`, id, now, r.CPUPct, r.RAMPct, r.DiskPct, r.Load1, r.NetRx, r.NetTx); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

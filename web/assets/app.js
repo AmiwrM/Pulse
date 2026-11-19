@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=10';
+import { lineChart, sparkline } from './charts.js?v=13';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -404,7 +404,7 @@ function renderAuth(mode, message = '') {
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.0')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.1')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -525,6 +525,39 @@ function connectSSE() {
     handleSSE(msg);
   };
 }
+function agentSummaryHTML(agents) {
+  const online = agents.filter(statusFromAgent).length;
+  return `<span><b>${num(agents.length)}</b> سرور ثبت شده</span><span class="badge-dot"><span class="dot"></span>${num(online)} آنلاین</span>${agents.length - online ? `<span class="badge-dot bad"><span class="dot"></span>${num(agents.length - online)} آفلاین</span>` : ''}`;
+}
+
+function updateAgentSummary() {
+  const el = document.querySelector('[data-agent-summary]');
+  if (el) el.innerHTML = agentSummaryHTML(state.agents);
+  const agents = state.agents || [];
+  const online = agents.filter(statusFromAgent).length;
+  const value = document.querySelector('[data-dashboard-agents-value]');
+  if (value) value.innerHTML = `${num(online)}<small>از ${num(agents.length)}</small>`;
+  const foot = document.querySelector('[data-dashboard-agents-foot]');
+  if (foot) foot.textContent = agents.length ? (online === agents.length ? 'همه ایجنت‌ها متصل' : 'برخی ایجنت‌ها قطع هستند') : 'هنوز ایجنتی اضافه نشده';
+  const chip = document.querySelector('[data-dashboard-agent-chip]');
+  if (chip) chip.innerHTML = `${icon('server')} ${num(online)} سرور آنلاین`;
+}
+
+function updateMiniAgent(a) {
+  const row = document.querySelector(`[data-mini-agent="${Number(a.id)}"]`);
+  if (!row) return false;
+  const q = agentQuality(a);
+  const meta = row.querySelector('[data-mini-meta]');
+  if (meta) meta.textContent = `${q.online ? 'آنلاین' : 'آفلاین'} · ${a.hostname || 'بدون هاست'}`;
+  const cpu = row.querySelector('[data-mini-cpu]');
+  if (cpu) cpu.style.width = `${clamp(a.cpu_pct || 0, 0, 100)}%`;
+  const ram = row.querySelector('[data-mini-ram]');
+  if (ram) ram.style.width = `${clamp(a.ram_pct || 0, 0, 100)}%`;
+  const online = row.querySelector('[data-mini-online]');
+  if (online) online.classList.toggle('off', !q.online);
+  return true;
+}
+
 function handleSSE(msg) {
   const type = msg?.type;
   if (!type) return;
@@ -535,6 +568,17 @@ function handleSSE(msg) {
   }
   if (type === 'toast') {
     toast(msg.data?.message || '', msg.data?.level || 'info');
+  }
+  if (type === 'agent.offline') {
+    const d = msg.data || {};
+    const a = state.agents.find((item) => Number(item.id) === Number(d.agent_id));
+    if (a) {
+      if (d.last_seen) a.last_seen = d.last_seen;
+      updateAgentCard(a);
+      updateMiniAgent(a);
+      updateAgentSummary();
+      return;
+    }
   }
   if (type === 'agent.updated') {
     const d = msg.data || {};
@@ -551,14 +595,23 @@ function handleSSE(msg) {
       a.version = d.version || a.version;
       a.hostname = d.hostname || a.hostname;
       a.os = d.os || a.os;
+      a.ip = d.ip || a.ip;
       a.last_seen = d.last_seen || a.last_seen;
       if (state.summary?.stats) {
         state.summary.stats.agents_online = state.agents.filter(statusFromAgent).length;
       }
-      if (!state.modal && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
-        if (state.view === 'servers') { renderServers(); updateBadges(); return; }
-        if (state.view === 'dashboard') { renderDashboard(); updateBadges(); return; }
+      const cardPatched = updateAgentCard(a);
+      const miniPatched = updateMiniAgent(a);
+      updateAgentSummary();
+      if (state.view === 'servers') {
+        if (!cardPatched) scheduleRefresh();
+        return;
       }
+      if (state.view === 'dashboard') {
+        if (!miniPatched) scheduleRefresh();
+        return;
+      }
+      return;
     }
   }
   scheduleRefresh();
@@ -720,11 +773,11 @@ function typeChip(type) {
   const t = typeMeta(type);
   return `<span class="type-chip" title="${esc(t.label)}">${icon(t.icon)}${esc(t.short)}</span>`;
 }
-function gaugeRing(percent, color, label = '') {
+function gaugeRing(percent, color, label = '', key = '') {
   const p = clamp(Number(percent) || 0, 0, 100);
   const c = 2 * Math.PI * 30;
   const offset = c - (p / 100) * c;
-  return `<div class="gauge-unit"><div class="gauge"><svg viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="30"/><circle class="val" cx="40" cy="40" r="30" stroke="${color}" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"/></svg><span>${num(p)}٪</span></div><div class="gauge-label">${esc(label)}</div></div>`;
+  return `<div class="gauge-unit"${key ? ` data-agent-gauge="${key}"` : ''}><div class="gauge"><svg viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="30"/><circle class="val" cx="40" cy="40" r="30" stroke="${color}" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"/></svg><span>${num(p)}٪</span></div><div class="gauge-label">${esc(label)}</div></div>`;
 }
 function gaugeColor(value) {
   if (value >= 90) return '#fb7185';
@@ -734,6 +787,14 @@ function gaugeColor(value) {
 function statusFromAgent(a) {
   if (!a.last_seen) return false;
   return Date.now() / 1000 - a.last_seen <= (state.agentsOfflineAfter || 120);
+}
+function agentQuality(a) {
+  const online = statusFromAgent(a);
+  const age = a.last_seen ? Math.max(0, Date.now() / 1000 - Number(a.last_seen)) : null;
+  if (!online) return { online, text: age === null ? 'بدون گزارش' : 'قطع', cls: 'off', age };
+  if (age < 10) return { online, text: 'عالی', cls: 'great', age };
+  if (age < 30) return { online, text: 'خوب', cls: 'good', age };
+  return { online, text: 'متصل', cls: 'ok', age };
 }
 function monitorCard(m, options = {}) {
   const status = m.status || 'unknown';
@@ -854,7 +915,7 @@ function renderDashboard() {
           <span class="chip cyan">${icon('activity')} ${num(stats.total || 0)} مانیتور</span>
           <span class="chip green">${icon('check')} ${num(stats.up || 0)} سالم</span>
           ${hasDown ? `<span class="chip red">${icon('alert')} ${num(stats.down || 0)} قطع</span>` : ''}
-          <span class="chip violet">${icon('server')} ${num(onlineAgents.length)} سرور آنلاین</span>
+          <span class="chip violet" data-dashboard-agent-chip>${icon('server')} ${num(onlineAgents.length)} سرور آنلاین</span>
         </div>
       </div>
       <div class="overview-gauge">
@@ -888,8 +949,8 @@ function renderDashboard() {
       </div>
       <div class="panel stat-card">
         <div class="stat-top"><span class="stat-label">سرورهای آنلاین</span><span class="stat-ico violet">${icon('server')}</span></div>
-        <div class="stat-value">${num(onlineAgents.length)}<small>از ${num(agents.length)}</small></div>
-        <div class="stat-foot">${agents.length ? (onlineAgents.length === agents.length ? 'همه ایجنت‌ها متصل' : 'برخی ایجنت‌ها قطع هستند') : 'هنوز ایجنتی اضافه نشده'}</div>
+        <div class="stat-value" data-dashboard-agents-value>${num(onlineAgents.length)}<small>از ${num(agents.length)}</small></div>
+        <div class="stat-foot" data-dashboard-agents-foot>${agents.length ? (onlineAgents.length === agents.length ? 'همه ایجنت‌ها متصل' : 'برخی ایجنت‌ها قطع هستند') : 'هنوز ایجنتی اضافه نشده'}</div>
       </div>
     </div>
 
@@ -919,14 +980,14 @@ function renderDashboard() {
         <div class="mini-agent-list">
           ${agents.length ? agents.slice(0, 5).map((a) => {
             const on = statusFromAgent(a);
-            return `<div class="mini-agent" data-action="open-agent" data-id="${a.id}" role="button" tabindex="0">
+            return `<div class="mini-agent" data-action="open-agent" data-id="${a.id}" data-mini-agent="${a.id}" role="button" tabindex="0">
               <div class="mini-ico">${icon('server')}</div>
-              <div class="mini-info"><div class="mini-name">${esc(a.name)}</div><div class="mini-meta">${on ? 'آنلاین' : 'آفلاین'} · ${esc(a.hostname || 'بدون هاست')}</div></div>
+              <div class="mini-info"><div class="mini-name">${esc(a.name)}</div><div class="mini-meta" data-mini-meta>${on ? 'آنلاین' : 'آفلاین'} · ${esc(a.hostname || 'بدون هاست')}</div></div>
               <div class="mini-bars">
-                <div class="mini-bar"><span class="cpu" style="width:${clamp(a.cpu_pct || 0, 0, 100)}%"></span></div>
-                <div class="mini-bar"><span class="ram" style="width:${clamp(a.ram_pct || 0, 0, 100)}%"></span></div>
+                <div class="mini-bar"><span class="cpu" data-mini-cpu style="width:${clamp(a.cpu_pct || 0, 0, 100)}%"></span></div>
+                <div class="mini-bar"><span class="ram" data-mini-ram style="width:${clamp(a.ram_pct || 0, 0, 100)}%"></span></div>
               </div>
-              <span class="agent-online ${on ? '' : 'off'}" style="padding:2px 6px"><span class="dot"></span></span>
+              <span class="agent-online ${on ? '' : 'off'}" data-mini-online style="padding:2px 6px"><span class="dot"></span></span>
             </div>`;
           }).join('') : `<div class="empty" style="padding:28px 10px"><div class="empty-ico" style="width:46px;height:46px">${icon('server')}</div><h3 style="font-size:12px">سروری متصل نیست</h3><p style="font-size:10px">با نصب ایجنت، منابع سرور را زنده ببینید.</p><a class="btn btn-sm btn-soft" href="#/servers">${icon('plus')} افزودن سرور</a></div>`}
         </div>
@@ -1179,57 +1240,104 @@ function renderIncidents() {
 
 /* ------------------------------------------------------------------ servers */
 function agentCard(a) {
-  const online = statusFromAgent(a);
+  const q = agentQuality(a);
   const services = Array.isArray(a.services) ? a.services : [];
   const wg = Array.isArray(a.wireguard) ? a.wireguard : [];
-  const peers = wg.reduce((s, w) => s + (Array.isArray(w.peers) ? w.peers.length : 0), 0);
-  const age = a.last_seen ? Math.max(0, Date.now() / 1000 - Number(a.last_seen)) : null;
-  let quality = 'بدون گزارش';
-  let qualityClass = 'off';
-  if (online) {
-    if (age < 50) { quality = 'عالی'; qualityClass = 'great'; }
-    else if (age < 100) { quality = 'خوب'; qualityClass = 'good'; }
-    else { quality = 'متصل'; qualityClass = 'ok'; }
-  } else if (age !== null) {
-    quality = 'قطع';
-  }
   const serviceOnline = services.filter((s) => s.active).length;
   return `<article class="panel agent-card" data-action="open-agent" data-id="${a.id}" role="button" tabindex="0">
     <div class="agent-head">
       <div class="agent-ico agent-ico-pulse">${icon('agent')}</div>
-      <div class="agent-title"><div class="agent-name">${esc(a.name)}</div><div class="agent-host">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}</div></div>
-      <span class="agent-online ${online ? '' : 'off'}"><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span>
+      <div class="agent-title"><div class="agent-name">${esc(a.name)}</div><div class="agent-host" data-agent-host>${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}</div></div>
+      <span class="agent-online ${q.online ? '' : 'off'}" data-agent-online><span class="dot"></span>${q.online ? 'آنلاین' : 'آفلاین'}</span>
     </div>
     <div class="agent-connection">
-      <span class="agent-quality ${qualityClass}">${icon('signal')} ${quality}</span>
+      <span class="agent-quality ${q.cls}" data-agent-quality>${icon('signal')} ${q.text}</span>
       <span class="chip cyan">REST</span>
-      <span class="agent-ip">${esc(a.ip || 'بدون IP')}</span>
+      <span class="agent-ip" data-agent-ip>${esc(a.ip || 'بدون IP')}</span>
     </div>
     <div class="gauges">
-      ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU')}
-      ${gaugeRing(a.ram_pct || 0, gaugeColor(a.ram_pct || 0), 'RAM')}
-      ${gaugeRing(a.disk_pct || 0, gaugeColor(a.disk_pct || 0), 'دیسک')}
+      ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU', 'cpu')}
+      ${gaugeRing(a.ram_pct || 0, gaugeColor(a.ram_pct || 0), 'RAM', 'ram')}
+      ${gaugeRing(a.disk_pct || 0, gaugeColor(a.disk_pct || 0), 'دیسک', 'disk')}
     </div>
     <div class="agent-telemetry">
-      <div class="telemetry-item"><b>${nf1.format(a.load1 || 0)}</b><span>Load 1m</span></div>
-      <div class="telemetry-item"><b class="ltr" style="unicode-bidi:embed">${a.ram_total ? bytes(a.ram_total) : '—'}</b><span>حافظه</span></div>
-      <div class="telemetry-item"><b style="direction:ltr">${a.net_rx_bps ? bytes(a.net_rx_bps) + '/s' : '—'}</b><span>دریافت</span></div>
+      <div class="telemetry-item" data-agent-load><b>${nf1.format(a.load1 || 0)}</b><span>Load 1m</span></div>
+      <div class="telemetry-item" data-agent-ram><b class="ltr" style="unicode-bidi:embed">${a.ram_total ? bytes(a.ram_total) : '—'}</b><span>حافظه</span></div>
+      <div class="telemetry-item" data-agent-net><b style="direction:ltr">${a.net_rx_bps ? bytes(a.net_rx_bps) + '/s' : '—'}</b><span>دریافت</span></div>
     </div>
     ${services.length ? `<div class="service-chips">${services.slice(0, 5).map((s) => `<span class="service-chip ${s.active ? '' : 'off'}"><span class="dot"></span>${esc(s.name)}</span>`).join('')}${services.length > 5 ? `<span class="service-chip">+${num(services.length - 5)}</span>` : ''}</div>` : ''}
-    <div class="agent-foot"><span>${wg.length ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard` : services.length ? `${icon('sliders')} ${num(serviceOnline)} از ${num(services.length)} سرویس فعال` : online ? 'ارتباط REST برقرار است' : 'آخرین گزارش ' + timeAgo(a.last_seen)}</span><span>${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}</span></div>
+    <div class="agent-foot"><span data-agent-foot>${wg.length ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard` : services.length ? `${icon('sliders')} ${num(serviceOnline)} از ${num(services.length)} سرویس فعال` : q.online ? 'ارتباط REST برقرار است' : 'آخرین گزارش ' + timeAgo(a.last_seen)}</span><span data-agent-version>${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}</span></div>
   </article>`;
+}
+
+function updateAgentCard(a) {
+  const card = document.querySelector(`.agent-card[data-id="${Number(a.id)}"]`);
+  if (!card) return false;
+  const q = agentQuality(a);
+  const onlineEl = card.querySelector('[data-agent-online]');
+  if (onlineEl) {
+    onlineEl.classList.toggle('off', !q.online);
+    onlineEl.innerHTML = `<span class="dot"></span>${q.online ? 'آنلاین' : 'آفلاین'}`;
+  }
+  const qualityEl = card.querySelector('[data-agent-quality]');
+  if (qualityEl) {
+    qualityEl.className = `agent-quality ${q.cls}`;
+    qualityEl.innerHTML = `${icon('signal')} ${q.text}`;
+  }
+  const ipEl = card.querySelector('[data-agent-ip]');
+  if (ipEl) ipEl.textContent = a.ip || 'بدون IP';
+  const hostEl = card.querySelector('[data-agent-host]');
+  if (hostEl) hostEl.textContent = `${a.hostname || '—'}${a.os ? ' · ' + a.os : ''}`;
+  [['cpu', a.cpu_pct], ['ram', a.ram_pct], ['disk', a.disk_pct]].forEach(([key, raw]) => {
+    const unit = card.querySelector(`[data-agent-gauge="${key}"]`);
+    if (!unit) return;
+    const p = clamp(Number(raw) || 0, 0, 100);
+    const c = 2 * Math.PI * 30;
+    const val = unit.querySelector('circle.val');
+    if (val) {
+      val.setAttribute('stroke', gaugeColor(p));
+      val.setAttribute('stroke-dashoffset', (c - (p / 100) * c).toFixed(2));
+    }
+    const txt = unit.querySelector('.gauge > span');
+    if (txt) txt.textContent = `${num(p)}٪`;
+  });
+  const load = card.querySelector('[data-agent-load] b');
+  if (load) load.textContent = nf1.format(a.load1 || 0);
+  const ram = card.querySelector('[data-agent-ram] b');
+  if (ram) ram.textContent = a.ram_total ? bytes(a.ram_total) : '—';
+  const net = card.querySelector('[data-agent-net] b');
+  if (net) net.textContent = a.net_rx_bps ? bytes(a.net_rx_bps) + '/s' : '—';
+  const services = Array.isArray(a.services) ? a.services : [];
+  const wg = Array.isArray(a.wireguard) ? a.wireguard : [];
+  const foot = card.querySelector('[data-agent-foot]');
+  if (foot) {
+    foot.innerHTML = wg.length
+      ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard`
+      : services.length
+        ? `${icon('sliders')} ${num(services.filter((s) => s.active).length)} از ${num(services.length)} سرویس فعال`
+        : q.online ? 'ارتباط REST برقرار است' : 'آخرین گزارش ' + timeAgo(a.last_seen);
+  }
+  const version = card.querySelector('[data-agent-version]');
+  if (version) version.textContent = `${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}`;
+  const gaugeEls = card.querySelectorAll('.gauge .val');
+  gaugeEls.forEach((el) => {
+    const dash = el.getAttribute('stroke-dasharray');
+    const final = el.getAttribute('stroke-dashoffset');
+    if (dash && final !== null) el.style.strokeDashoffset = final;
+  });
+  return true;
 }
 function renderServers() {
   const agents = state.agents || [];
   const online = agents.filter(statusFromAgent).length;
   $('#view').innerHTML = `
     <div class="page-toolbar">
-      <div class="page-summary"><span><b>${num(agents.length)}</b> سرور ثبت شده</span><span class="badge-dot"><span class="dot"></span>${num(online)} آنلاین</span>${agents.length - online ? `<span class="badge-dot bad"><span class="dot"></span>${num(agents.length - online)} آفلاین</span>` : ''}</div>
+      <div class="page-summary" data-agent-summary>${agentSummaryHTML(agents)}</div>
       <div class="toolbar-spacer"></div>
       <button class="btn btn-primary" type="button" data-action="new-agent">${icon('plus')} افزودن سرور</button>
     </div>
     ${agents.length ? `<div class="agent-grid">${agents.slice().sort((a, b) => Number(statusFromAgent(b)) - Number(statusFromAgent(a)) || a.name.localeCompare(b.name, 'fa')).map(agentCard).join('')}</div>` : `<div class="panel empty" style="margin-top:8px">
-      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۵ ثانیه با REST به پالس گزارش شود.</p>
+      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۱ ثانیه با REST به پالس گزارش شود.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px"><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button><button class="btn btn-sm" type="button" data-action="agent-guide">${icon('terminal')} نصب یک‌خطی</button></div>
     </div>`}
     <div class="banner" style="margin-top:16px">
@@ -1561,7 +1669,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.0')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.1')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -1877,7 +1985,7 @@ function openAgentGuide() {
     body: `<div class="steps">
       <div class="step"><span class="step-num">۱</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
       <div class="step"><span class="step-num">۲</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
-      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال REST را با <code>pulse-agent status</code> ببین. گزارش‌ها هر ۵ ثانیه ارسال می‌شوند و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
+      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال REST را با <code>pulse-agent status</code> ببین. گزارش‌ها هر ۱ ثانیه ارسال می‌شوند و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
     </div>
     <div class="agent-rest-note">${icon('signal')} اتصال REST/JSON با هندشیک اولیه، keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
     <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. توکن را در جای امن نگه دار.</div></div>`,

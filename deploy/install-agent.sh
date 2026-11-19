@@ -13,7 +13,7 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.4.0      Release tag (default: latest)
+#   --release v1.4.1      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
@@ -23,7 +23,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.4.0"
+INSTALLER_VERSION="1.4.1"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 
@@ -35,7 +35,7 @@ BINARY_URL="${PULSE_AGENT_BINARY_URL:-}"
 RELEASE="${PULSE_VERSION:-latest}"
 SERVICES=""
 WG=1
-AGENT_INTERVAL="5s"
+AGENT_INTERVAL="1s"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -57,7 +57,7 @@ Options:
   --binary-url URL      Download the binary from a custom URL
   --services LIST       Comma-separated systemd services (e.g. xray,wireguard)
   --no-wg               Disable WireGuard collection
-  --interval DURATION   Report interval (default: 5s)
+  --interval DURATION   Report interval (default: 1s)
   -h, --help            Show this help
 HELP
   exit 0
@@ -85,7 +85,7 @@ done
 [[ "$SERVER" == http://* || "$SERVER" == https://* ]] || die "--server must start with http:// or https://"
 SERVER="${SERVER%/}"
 [[ -n "$NAME" && ${#NAME} -le 80 && "$NAME" != *$'\n'* && "$NAME" != *$'\r'* ]] || die "Invalid --name."
-[[ "$AGENT_INTERVAL" =~ ^[0-9]+(s|m|h)$ ]] || die "Invalid --interval (e.g. 5s, 1m)."
+[[ "$AGENT_INTERVAL" =~ ^[0-9]+(s|m|h)$ ]] || die "Invalid --interval (e.g. 1s, 1m)."
 [[ "$RELEASE" == "latest" || "$RELEASE" == v* ]] || RELEASE="v$RELEASE"
 
 ARCH="$(uname -m)"

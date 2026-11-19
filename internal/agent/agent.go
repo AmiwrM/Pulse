@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version         = "1.4.0"
+	Version         = "1.4.1"
 	ProtocolVersion = 2
 )
 
@@ -271,8 +271,8 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 		logger = slog.Default()
 	}
 	interval := opts.Interval
-	if interval < 2*time.Second {
-		interval = 5 * time.Second
+	if interval < time.Second {
+		interval = time.Second
 	}
 	server := strings.TrimRight(strings.TrimSpace(opts.Server), "/")
 	if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {
@@ -325,8 +325,8 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 		}
 		failures = 0
 		delay = interval - elapsed
-		if delay < 2*time.Second {
-			delay = 2 * time.Second
+		if delay < time.Second {
+			delay = time.Second
 		}
 		logger.Info("agent report sent", "rtt_ms", elapsed.Milliseconds(), "cpu", report.CPUPct, "ram", report.RAMPct, "disk", report.DiskPct)
 	}
