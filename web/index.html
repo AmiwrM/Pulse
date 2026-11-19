@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#060a14">
+  <meta name="description" content="پالس — سامانه پایش لحظه‌ای سرورها، دامنه‌ها و کانفیگ‌ها">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="پالس">
+  <title>پالس | پایش هوشمند زیرساخت</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="preload" href="/fonts/IRANSansWebFaNum.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/IRANSansWebFaNum_Bold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/app.css?v=7">
+</head>
+<body>
+  <div class="bg-fx" aria-hidden="true">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="orb orb-c"></div>
+    <div class="grid-layer"></div>
+    <div class="noise"></div>
+  </div>
+
+  <div id="boot" class="boot">
+    <div class="boot-mark">
+      <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
+      <svg viewBox="0 0 48 48" class="logo-svg" aria-hidden="true">
+        <defs><linearGradient id="lgBoot" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+        <rect x="6" y="6" width="36" height="36" rx="12" fill="url(#lgBoot)"/>
+        <path d="M11 25h6l3.2-8 5.4 16 3.4-9h8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="boot-title">پـالـس</div>
+    <div class="boot-sub">در حال برقراری ارتباط امن…</div>
+    <div class="boot-bar"><span></span></div>
+  </div>
+
+  <div id="auth-root" class="auth-root hidden"></div>
+
+  <div id="app" class="app hidden">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" data-action="close-sidebar"></div>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#/dashboard" aria-label="پالس">
+        <span class="brand-mark">
+          <span class="ring r1"></span>
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <defs><linearGradient id="lgSide" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+            <rect x="5" y="5" width="38" height="38" rx="13" fill="url(#lgSide)"/>
+            <path d="M10 25h6l3.2-8 5.4 16 3.4-9h8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="brand-text"><b>پالس</b><small>Pulse Monitor</small></span>
+        <span class="brand-live" title="پایش زنده"></span>
+      </a>
+
+      <nav class="nav" aria-label="منوی اصلی">
+        <div class="nav-label">مرکز فرمان</div>
+        <a class="nav-item" data-route="dashboard" href="#/dashboard">
+          <span class="ni"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span>
+          <span>داشبورد</span><span class="nav-glow"></span>
+        </a>
+        <a class="nav-item" data-route="monitors" href="#/monitors">
+          <span class="ni"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.2-6 4 12 2.6-6H21"/></svg></span>
+          <span>مانیتورها</span><span class="nav-badge" id="nav-monitors-badge"></span>
+        </a>
+        <a class="nav-item" data-route="incidents" href="#/incidents">
+          <span class="ni"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17.5v.5"/></svg></span>
+          <span>رخدادها</span><span class="nav-badge danger" id="nav-incidents-badge"></span>
+        </a>
+        <a class="nav-item" data-route="servers" href="#/servers">
+          <span class="ni"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></span>
+          <span>سرورها</span>
+        </a>
+        <div class="nav-label">اتوماسیون</div>
+        <a class="nav-item" data-route="rules" href="#/rules">
+          <span class="ni"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></span>
+          <span>قوانین</span>
+        </a>
+        <a class="nav-item" data-route="cloudflare" href="#/cloudflare">
+          <span class="ni"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 18 10.5a3.5 3.5 0 0 1-.5 7H7Z"/><path d="M9 14h6"/></svg></span>
+          <span>کلادفلر</span>
+        </a>
+        <a class="nav-item" data-route="notifications" href="#/notifications">
+          <span class="ni"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></span>
+          <span>اعلان‌ها</span>
+        </a>
+        <a class="nav-item" data-route="settings" href="#/settings">
+          <span class="ni"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3H9.8l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.5l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.6h4.4l.4-2.6a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></span>
+          <span>تنظیمات</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="health-chip" id="side-health">
+          <span class="dot"></span>
+          <span class="health-text">در حال اتصال…</span>
+        </div>
+        <div class="version-line">
+          <span>پالس <span id="side-version">—</span></span>
+          <span class="sep"></span>
+          <button class="link-btn" data-action="logout">خروج</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-right">
+          <button class="icon-btn menu-btn" data-action="open-sidebar" aria-label="منو">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+          <div class="page-heading">
+            <div class="crumb"><span id="page-crumb">مرکز فرمان</span><span class="crumb-dot"></span><span id="page-sub">نمای کلی زیرساخت</span></div>
+            <h1 id="page-title">داشبورد</h1>
+          </div>
+        </div>
+        <div class="topbar-left">
+          <div class="live-pill" id="live-pill">
+            <span class="pulse-dot"></span>
+            <span>زنده</span>
+          </div>
+          <div class="clock" id="clock">
+            <span class="clock-time">—</span>
+            <span class="clock-date">—</span>
+          </div>
+          <button class="icon-btn" data-action="refresh" title="به‌روزرسانی" aria-label="به‌روزرسانی">
+            <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7"/></svg>
+          </button>
+          <button class="btn btn-primary only-desktop" data-action="quick-monitor">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <span>مانیتور جدید</span>
+          </button>
+          <button class="avatar-btn" data-action="user-menu" title="حساب کاربری" id="avatar-btn">م</button>
+        </div>
+      </header>
+
+      <div class="view" id="view" aria-live="polite"></div>
+
+      <footer class="footer">
+        <div>پالس — پایش هوشمند زیرساخت</div>
+        <div class="footer-links">
+          <span id="footer-status" class="footer-status"><span class="dot"></span> متصل</span>
+          <span>ساخته‌شده برای آرامش خاطر</span>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <script type="module" src="/assets/app.js?v=7"></script>
+</body>
+</html>

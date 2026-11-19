@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Pulse Server Agent Installer — Debian / Ubuntu (amd64 / arm64)
+#
+# Installs the Pulse binary in agent mode on a monitored VPS. The binary is
+# downloaded from the official GitHub release of the same repository.
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/deploy/install-agent.sh -o /tmp/install-agent.sh
+#   sudo bash /tmp/install-agent.sh \
+#     --server https://status.example.com \
+#     --token TOKEN \
+#     --name vps-1
+#
+# Optional:
+#   --release v1.2.0      Release tag (default: latest)
+#   --binary PATH         Use a local pulse-linux-ARCH binary
+#   --binary-url URL      Download the binary from a custom URL
+#   --services xray,wg    systemd services to report
+#   --no-wg               Disable WireGuard collection
+#
+# Run as root on Debian/Ubuntu.
+# =============================================================================
+set -Eeuo pipefail
+
+INSTALLER_VERSION="1.2.0"
+REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
+REPO_URL="https://github.com/${REPO_SLUG}"
+
+SERVER=""
+TOKEN=""
+NAME="$(hostname)"
+BINARY=""
+BINARY_URL="${PULSE_AGENT_BINARY_URL:-}"
+RELEASE="${PULSE_VERSION:-latest}"
+SERVICES=""
+WG=1
+AGENT_INTERVAL="30s"
+
+log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<HELP
+Pulse Server Agent Installer ${INSTALLER_VERSION}
+
+Usage:
+  sudo bash install-agent.sh --server https://status.example.com --token TOKEN --name vps-1
+
+Options:
+  --server URL          Pulse public URL (required)
+  --token TOKEN         Agent token from the panel (required)
+  --name NAME           Display name (default: hostname)
+  --release TAG         GitHub release tag (default: latest)
+  --binary PATH         Use a local pulse-linux-ARCH binary
+  --binary-url URL      Download the binary from a custom URL
+  --services LIST       Comma-separated systemd services (e.g. xray,wireguard)
+  --no-wg               Disable WireGuard collection
+  --interval DURATION   Report interval (default: 30s)
+  -h, --help            Show this help
+HELP
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --server) SERVER="$2"; shift 2 ;;
+    --token) TOKEN="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --release) RELEASE="$2"; shift 2 ;;
+    --binary) BINARY="$2"; shift 2 ;;
+    --binary-url) BINARY_URL="$2"; shift 2 ;;
+    --services) SERVICES="$2"; shift 2 ;;
+    --no-wg) WG=0; shift ;;
+    --interval) AGENT_INTERVAL="$2"; shift 2 ;;
+    -h|--help) usage ;;
+    *) die "Unknown option: $1 (try --help)" ;;
+  esac
+done
+
+[[ ${EUID} -eq 0 ]] || die "Please run as root: sudo bash $0"
+[[ -n "$SERVER" ]] || die "--server is required."
+[[ -n "$TOKEN" ]] || die "--token is required."
+[[ "$SERVER" == http://* || "$SERVER" == https://* ]] || die "--server must start with http:// or https://"
+[[ -n "$NAME" && ${#NAME} -le 80 && "$NAME" != *$'\n'* && "$NAME" != *$'\r'* ]] || die "Invalid --name."
+[[ "$AGENT_INTERVAL" =~ ^[0-9]+(s|m|h)$ ]] || die "Invalid --interval (e.g. 30s, 5m)."
+[[ "$RELEASE" == "latest" || "$RELEASE" == v* ]] || RELEASE="v$RELEASE"
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64)  ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) die "Unsupported architecture: $ARCH (amd64/arm64 only)" ;;
+esac
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+RELEASE_ASSET=""
+release_url() {
+  local asset="$1"
+  if [[ "$RELEASE" == "latest" ]]; then
+    printf '%s/releases/latest/download/%s' "$REPO_URL" "$asset"
+  else
+    printf '%s/releases/download/%s/%s' "$REPO_URL" "$RELEASE" "$asset"
+  fi
+}
+
+if [[ -z "$BINARY" ]]; then
+  if [[ -z "$BINARY_URL" ]]; then
+    RELEASE_ASSET="pulse-linux-$ARCH"
+    BINARY_URL="$(release_url "$RELEASE_ASSET")"
+  fi
+  download_path="$TMP/pulse"
+  [[ -n "$RELEASE_ASSET" ]] && download_path="$TMP/$RELEASE_ASSET"
+  log "Downloading agent binary: $BINARY_URL"
+  command -v curl >/dev/null 2>&1 || die "curl is required."
+  curl -fsSL --retry 4 --retry-delay 2 "$BINARY_URL" -o "$download_path" || die "Could not download the agent binary. Use --binary or --binary-url."
+
+  if [[ -n "$RELEASE_ASSET" ]]; then
+    sum_url="$(release_url SHA256SUMS)"
+    if curl -fsSL --retry 2 "$sum_url" -o "$TMP/SHA256SUMS" 2>/dev/null; then
+      sum_line="$(grep " $RELEASE_ASSET\$" "$TMP/SHA256SUMS" || true)"
+      if [[ -n "$sum_line" ]]; then
+        ( cd "$TMP" && printf '%s\n' "$sum_line" | sha256sum -c - >/dev/null ) \
+          || die "Agent binary checksum verification failed."
+        log "Release checksum verified."
+      fi
+    fi
+  fi
+  BINARY="$download_path"
+fi
+
+[[ -f "$BINARY" ]] || die "Binary not found: $BINARY"
+chmod 0755 "$BINARY"
+VERSION_OUT="$("$BINARY" --version 2>/dev/null | sed -n '1p' || true)"
+[[ "$VERSION_OUT" == pulse* ]] || die "The selected file is not a runnable Pulse Linux binary for $ARCH."
+
+install -m 0755 "$BINARY" /usr/local/bin/pulse
+install -d -m 0750 /etc/pulse
+
+env_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/}"
+  s="${s//$'\r'/}"
+  printf '%s' "$s"
+}
+
+umask 077
+{
+  printf 'PULSE_SERVER="%s"\n' "$(env_escape "$SERVER")"
+  printf 'PULSE_TOKEN="%s"\n' "$(env_escape "$TOKEN")"
+  printf 'PULSE_AGENT_NAME="%s"\n' "$(env_escape "$NAME")"
+  if [[ -n "$SERVICES" ]]; then
+    printf 'PULSE_AGENT_SERVICES="%s"\n' "$(env_escape "$SERVICES")"
+  fi
+} >/etc/pulse/agent.env
+chmod 0600 /etc/pulse/agent.env
+umask 022
+
+WG_FLAG=""
+[[ "$WG" -eq 0 ]] && WG_FLAG=" --wg=false"
+
+cat >/etc/systemd/system/pulse-agent.service <<UNIT
+[Unit]
+Description=Pulse server agent
+Documentation=${REPO_URL}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/pulse/agent.env
+ExecStart=/usr/local/bin/pulse --agent --interval $AGENT_INTERVAL$WG_FLAG
+Restart=always
+RestartSec=10
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+chmod 0600 /etc/systemd/system/pulse-agent.service
+
+systemctl daemon-reload
+systemctl enable pulse-agent >/dev/null 2>&1 || true
+systemctl restart pulse-agent || true
+sleep 1
+if ! systemctl is-active pulse-agent >/dev/null 2>&1; then
+  journalctl -u pulse-agent -n 80 --no-pager || true
+  die "pulse-agent did not start. Check: journalctl -u pulse-agent -n 100 --no-pager"
+fi
+
+echo
+echo "============================================================"
+echo " Pulse agent installed"
+echo "============================================================"
+echo " Version : ${VERSION_OUT#pulse }"
+echo " Server  : $SERVER"
+echo " Name    : $NAME"
+echo " Config  : /etc/pulse/agent.env (mode 600)"
+echo " Service : systemctl status pulse-agent --no-pager"
+echo " Logs    : journalctl -u pulse-agent -f"
+echo "============================================================"

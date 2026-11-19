@@ -1,0 +1,25 @@
+# Pulse local data and build artifacts
+.data/
+data/
+bin/
+dist/
+coverage.out
+
+# Runtime databases and logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Secrets and local tooling
+.env
+.env.local
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Never publish local binaries / temporary installers
+*.exe
+*.msi
+*.run

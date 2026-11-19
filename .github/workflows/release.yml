@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Pulse (${{ matrix.arch }})
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" \
+            -o "dist/pulse-linux-${{ matrix.arch }}" ./cmd/pulse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pulse-linux-${{ matrix.arch }}
+          path: dist/pulse-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pulse-linux-*
+          merge-multiple: true
+          path: dist
+      - name: Add installer and checksums
+        run: |
+          cp install.sh dist/install.sh
+          cd dist
+          sha256sum pulse-linux-* install.sh > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "Pulse $GITHUB_REF_NAME" \
+              --generate-notes
+          fi

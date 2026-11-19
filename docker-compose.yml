@@ -1,0 +1,39 @@
+services:
+  pulse:
+    build:
+      context: .
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        VERSION: ${PULSE_VERSION:-1.2.0}
+        XRAY_VERSION: ${XRAY_VERSION:-v26.11.9}
+        XRAY_DOWNLOAD_URL: ${XRAY_DOWNLOAD_URL:-}
+    image: pulse-monitor:${PULSE_VERSION:-latest}
+    container_name: pulse
+    restart: unless-stopped
+    ports:
+      - "${PULSE_PORT:-8080}:8080"
+    volumes:
+      - pulse-data:/data
+    environment:
+      TZ: Asia/Tehran
+      PULSE_DB_PATH: /data/pulse.db
+      # Secrets can also be set from the panel. Environment overrides take
+      # precedence and are useful for infrastructure-as-code deployments:
+      # PULSE_TELEGRAM_TOKEN: ""
+      # PULSE_TELEGRAM_CHAT: ""
+      # PULSE_CF_TOKEN: ""
+      # PULSE_WEBHOOK_URL: ""
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pulse-data:
+    name: pulse-data
