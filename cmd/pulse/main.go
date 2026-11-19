@@ -15,9 +15,12 @@ import (
 	"pulse/internal/app"
 )
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 func main() {
+	if handleManagementCLI(os.Args[1:]) {
+		return
+	}
 	var (
 		addr      = flag.String("addr", env("PULSE_ADDR", ":8080"), "HTTP listen address")
 		dbPath    = flag.String("db", env("PULSE_DB_PATH", "./data/pulse.db"), "SQLite database path")

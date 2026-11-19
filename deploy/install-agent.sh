@@ -13,7 +13,7 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.2.0      Release tag (default: latest)
+#   --release v1.3.0      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
@@ -23,7 +23,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.2.0"
+INSTALLER_VERSION="1.3.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 
@@ -83,6 +83,7 @@ done
 [[ -n "$SERVER" ]] || die "--server is required."
 [[ -n "$TOKEN" ]] || die "--token is required."
 [[ "$SERVER" == http://* || "$SERVER" == https://* ]] || die "--server must start with http:// or https://"
+SERVER="${SERVER%/}"
 [[ -n "$NAME" && ${#NAME} -le 80 && "$NAME" != *$'\n'* && "$NAME" != *$'\r'* ]] || die "Invalid --name."
 [[ "$AGENT_INTERVAL" =~ ^[0-9]+(s|m|h)$ ]] || die "Invalid --interval (e.g. 30s, 5m)."
 [[ "$RELEASE" == "latest" || "$RELEASE" == v* ]] || RELEASE="v$RELEASE"
@@ -138,6 +139,8 @@ VERSION_OUT="$("$BINARY" --version 2>/dev/null | sed -n '1p' || true)"
 [[ "$VERSION_OUT" == pulse* ]] || die "The selected file is not a runnable Pulse Linux binary for $ARCH."
 
 install -m 0755 "$BINARY" /usr/local/bin/pulse
+ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
+ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
 install -d -m 0750 /etc/pulse
 
 env_escape() {
@@ -164,6 +167,16 @@ umask 022
 WG_FLAG=""
 [[ "$WG" -eq 0 ]] && WG_FLAG=" --wg=false"
 
+if command -v curl >/dev/null 2>&1; then
+  hello="$(curl -fsS --max-time 10 -H "X-Agent-Token: $TOKEN" -H "Accept: application/json" \
+    "$SERVER/api/agent/hello" 2>/dev/null || true)"
+  if [[ "$hello" == *'"ok":true'* ]]; then
+    log "Server handshake verified."
+  else
+    warn "The server handshake could not be verified now; the agent will retry automatically."
+  fi
+fi
+
 cat >/etc/systemd/system/pulse-agent.service <<UNIT
 [Unit]
 Description=Pulse server agent
@@ -177,7 +190,8 @@ User=root
 EnvironmentFile=/etc/pulse/agent.env
 ExecStart=/usr/local/bin/pulse --agent --interval $AGENT_INTERVAL$WG_FLAG
 Restart=always
-RestartSec=10
+RestartSec=5
+TimeoutStopSec=20
 LimitNOFILE=65536
 NoNewPrivileges=true
 ProtectSystem=full
@@ -207,4 +221,11 @@ echo " Name    : $NAME"
 echo " Config  : /etc/pulse/agent.env (mode 600)"
 echo " Service : systemctl status pulse-agent --no-pager"
 echo " Logs    : journalctl -u pulse-agent -f"
+echo
+echo " Manage  :"
+echo "   pulse-agent status"
+echo "   pulse-agent restart"
+echo "   pulse-agent logs"
+echo "   pulse-agent update"
+echo "   (pulse-a is an alias for pulse-agent)"
 echo "============================================================"

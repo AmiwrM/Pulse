@@ -7,6 +7,45 @@ import (
 	"time"
 )
 
+// handleAgentHello is the REST handshake used by the agent before it starts
+// reporting. It validates the token and tells the agent which panel/protocol it
+// is talking to. It intentionally does not update last_seen: a successful report
+// is the source of truth for online/offline status.
+func (a *App) handleAgentHello(w http.ResponseWriter, r *http.Request) {
+	token := agentToken(r)
+	if token == "" {
+		writeErr(w, http.StatusUnauthorized, "توکن ایجنت ارسال نشده است")
+		return
+	}
+	ag, err := a.db.GetAgentByToken(token)
+	if err != nil || ag == nil {
+		writeErr(w, http.StatusUnauthorized, "توکن ایجنت معتبر نیست")
+		return
+	}
+	conf := a.config()
+	writeData(w, map[string]any{
+		"agent": map[string]any{
+			"id": ag.ID, "name": ag.Name,
+		},
+		"server_version":      a.cfg.Version,
+		"protocol_version":    2,
+		"report_interval_sec": 30,
+		"offline_after_sec":   conf.AgentOfflineAfterSec,
+		"server_time":         nowUnix(),
+	})
+}
+
+func agentToken(r *http.Request) string {
+	if token := strings.TrimSpace(r.Header.Get("X-Agent-Token")); token != "" {
+		return token
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	return ""
+}
+
 func (a *App) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := a.db.ListAgents()
 	if err != nil {
@@ -48,12 +87,13 @@ func (a *App) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	downloadURL := conf.AgentDownloadURL
 	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 30s",
 		shellQuote(server), shellQuote(token), shellQuote(body.Name))
+	installCommand := agentInstallCommand(server, token, body.Name)
 	unit := agentUnit(server, token, body.Name)
 	a.db.AddAudit("admin", "agent.create", body.Name)
 	a.hub.broadcast("agent.created", map[string]any{"id": ag.ID})
 	writeData(w, map[string]any{
 		"agent": ag, "token": token, "server_url": server,
-		"command": command, "unit": unit,
+		"command": command, "install_command": installCommand, "unit": unit,
 		"download_url":     downloadURL,
 		"download_command": downloadCommand(downloadURL),
 	})
@@ -81,6 +121,7 @@ func (a *App) handleRotateAgent(w http.ResponseWriter, r *http.Request) {
 	a.db.AddAudit("admin", "agent.rotate", ag.Name)
 	writeData(w, map[string]any{
 		"token": token, "command": command, "server_url": server,
+		"install_command":  agentInstallCommand(server, token, ag.Name),
 		"unit":             agentUnit(server, token, ag.Name),
 		"download_url":     a.config().AgentDownloadURL,
 		"download_command": downloadCommand(a.config().AgentDownloadURL),
@@ -163,6 +204,14 @@ func (a *App) handleAgentMetrics(w http.ResponseWriter, r *http.Request) {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+const agentInstallerURL = "https://raw.githubusercontent.com/AmiwrM/Pulse/main/deploy/install-agent.sh"
+
+func agentInstallCommand(server, token, name string) string {
+	return "curl -fsSL " + shellQuote(agentInstallerURL) + " | sudo bash -s -- " +
+		"--server " + shellQuote(server) + " --token " + shellQuote(token) +
+		" --name " + shellQuote(name) + " --interval 30s"
 }
 
 func downloadCommand(url string) string {

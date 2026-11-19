@@ -16,6 +16,7 @@
 
 - [ویژگی‌ها](#ویژگیها)
 - [نصب سریع روی VPS](#نصب-سریع-روی-vps)
+- [دستورهای مدیریت VPS](#دستورهای-مدیریت-vps)
 - [شروع سریع با Docker](#شروع-سریع-با-docker)
 - [اجرای مستقیم و ساخت از سورس](#اجرای-مستقیم-و-ساخت-از-سورس)
 - [HTTPS و دامنه](#https-و-دامنه)
@@ -47,7 +48,7 @@
 | **قوانین هوشمند** | رویدادمحور با آستانه، محدوده، محدودیت زمانی، کانال‌های تلگرام/Web Push/وب‌هوک و ساعات سکوت |
 | **اعلان‌ها** | تلگرام (HTML)، Web Push (PWA روی اندروید و iPhone با iOS 16.4+)، وب‌هوک امضاشده با HMAC-SHA256، سابقه ارسال |
 | **Cloudflare** | بررسی توکن، لیست Zone و رکوردها، تغییر دستی رکورد، سوییچ خودکار A/AAAA در قطعی و بازگردانی پس از بازیابی با محافظت از تغییرات دستی |
-| **سرورها** | ایجنت سبک Go؛ CPU، RAM، Disk، Load، شبکه، آپتایم، وضعیت سرویس‌های systemd و همتایان WireGuard |
+| **سرورها** | ایجنت سبک Go با اتصال REST/JSON، هندشیک، keep-alive و backoff خودکار؛ CPU، RAM، Disk، Load، شبکه، آپتایم، وضعیت سرویس‌های systemd و همتایان WireGuard |
 | **امنیت** | حساب مدیر با bcrypt، نشست امضاشده، محدودیت تلاش ورود، CSRF، CSP، هدرهای امنیتی، توکن یک‌بارمصرف ایجنت |
 | **PWA** | نصب روی موبایل/دسکتاپ، آفلاین‌سازی پوسته، Service Worker، اعلان Push، آیکون‌های اختصاصی |
 | **رابط کاربری** | فارسی و RTL، فونت ایران‌سنس، تم تیره شیشه‌ای، انیمیشن، نمودارهای Canvas بدون کتابخانه خارجی، کاملاً ریسپانسیو |
@@ -105,8 +106,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -119,7 +120,7 @@ git push origin v1.2.0
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.2.0 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.3.0 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -137,6 +138,62 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 - روی نصب موجود، اگر دامنه را عوض کردید، آدرس عمومی را در **تنظیمات** هم به‌روز کنید؛ مقدار ذخیره‌شده در پنل بر مقدار اولیهٔ محیط اولویت دارد.
 
 > نصب مجدد/ارتقا با همان اسکریپت انجام می‌شود. قبل از جایگزینی باینری از دیتابیس قبلی در `/var/backups` نسخهٔ پشتیبان گرفته می‌شود و حساب مدیریت موجود بازنویسی نمی‌شود. برای ریسک کمتر، از دکمهٔ پشتیبان‌گیری پنل هم استفاده کنید.
+
+---
+
+## دستورهای مدیریت VPS
+
+بعد از نصب نسخهٔ `1.3.0` به بعد، هم پنل و هم ایجنت دستورهای مدیریتی دارند:
+
+```bash
+# پنل اصلی
+pulse status
+pulse restart
+pulse logs
+pulse update
+
+# ایجنت (روی سرورهای تحت پایش)
+pulse-agent status
+pulse-agent restart
+pulse-agent logs
+pulse-agent update
+```
+
+`pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
+
+```bash
+pulse update --release v1.3.0
+pulse-agent update --release v1.3.0
+```
+
+> برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
+
+### آپدیت دستی
+
+برای پنل، بعد از ساخته شدن Release:
+
+```bash
+curl -fL https://github.com/AmiwrM/Pulse/releases/latest/download/pulse-linux-amd64 -o /tmp/pulse
+sudo install -m 0755 /tmp/pulse /usr/local/bin/pulse
+sudo systemctl restart pulse
+```
+
+برای ایجنت:
+
+```bash
+curl -fL https://github.com/AmiwrM/Pulse/releases/latest/download/pulse-linux-amd64 -o /tmp/pulse
+sudo install -m 0755 /tmp/pulse /usr/local/bin/pulse
+sudo ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
+sudo ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
+sudo systemctl restart pulse-agent
+```
+
+بعد از این آپدیت، از دفعهٔ بعد `pulse update` یا `pulse-agent update` کافی است. اگر هنوز Release نداری، نصب مجدد با installer از سورس انجام می‌شود:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh -o /tmp/pulse-install.sh
+sudo bash /tmp/pulse-install.sh --help
+```
 
 ---
 
@@ -377,26 +434,37 @@ server {
 
 ## ایجنت سرور
 
-برای دیدن CPU/RAM/Disk، وضعیت سرویس‌ها و WireGuard، ایجنت را روی هر VPS نصب کنید. ایجنت همان باینری پالس است و در حالت `--agent` اجرا می‌شود.
+برای دیدن CPU/RAM/Disk، وضعیت سرویس‌ها و WireGuard، ایجنت را روی هر VPS نصب کنید. ایجنت همان باینری پالس است و در حالت `--agent` اجرا می‌شود. ارتباط ایجنت از نسخهٔ `1.3.0` یک REST/JSON با هندشیک اولیه، keep-alive و backoff خودکار است؛ اگر پنل لحظه‌ای در دسترس نباشد، ایجنت به‌جای قطع ماندن، خودش دوباره وصل می‌شود.
 
 ### ۱. ساخت توکن
 
-در صفحهٔ **سرورها** → **افزودن سرور** یک نام وارد کنید. توکن و unit آماده فقط **یک‌بار** نمایش داده می‌شوند.
+در صفحهٔ **سرورها** → **افزودن سرور** یک نام وارد کنید. توکن و **دستور نصب یک‌خطی** فقط یک‌بار نمایش داده می‌شوند.
 
 ### ۲. نصب
 
 اسکریپت ایجنت را روی VPS دانلود و اجرا کنید (باینری از GitHub Releases همین ریپو دانلود می‌شود):
 
+در پنجرهٔ ساخت ایجنت، دستور **نصب یک‌خطی** آماده است. همان را روی VPS مقصد اجرا کن. معادل دستی آن:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/deploy/install-agent.sh -o /tmp/install-agent.sh
+curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/deploy/install-agent.sh | \
+  sudo bash -s -- \
+    --server https://status.example.com \
+    --token TOKEN_FROM_PANEL \
+    --name vps-frankfurt-1 \
+    --services "xray,wireguard"
+```
 
-sudo bash /tmp/install-agent.sh \
-  --server https://status.example.com \
-  --token TOKEN_FROM_PANEL \
-  --name vps-frankfurt-1 \
-  --services "xray,wireguard"
+مدیریت ایجنت:
 
-sudo systemctl status pulse-agent --no-pager
+```bash
+pulse-agent status
+pulse-agent restart
+pulse-agent logs
+pulse-agent update
+
+# همین دستورها با نام کوتاه pulse-a هم کار می‌کنند
+pulse-a restart
 ```
 
 اگر هنوز ریلیزی منتشر نشده است، با `--binary /path/to/pulse-linux-amd64` از باینری ساخته‌شدهٔ خودتان استفاده کنید.
@@ -417,7 +485,7 @@ sudo bash -c 'set -a; . /etc/pulse/agent.env; set +a; /usr/local/bin/pulse --age
 
 ایجنت در بازهٔ پیش‌فرض ۳۰ ثانیه گزارش می‌دهد. اگر بیش از `Agent offline after` ثانیه گزارش نرسد، قانون `agent_offline` اجرا می‌شود.
 
-> توکن ایجنت در فایل unit قرار می‌گیرد؛ فایل را با `chmod 600` محافظت کنید. در صورت لو رفتن، از پنل **توکن جدید** بسازید.
+> توکن ایجنت در `/etc/pulse/agent.env` با مجوز `600` ذخیره می‌شود و داخل فایل unit قرار نمی‌گیرد. در صورت لو رفتن، از پنل **توکن جدید** بسازید.
 
 ---
 
@@ -431,7 +499,7 @@ sudo bash -c 'set -a; . /etc/pulse/agent.env; set +a; /usr/local/bin/pulse --age
 - متن کامل کانفیگ WireGuard (`[Interface]` + `Endpoint`)
 - خطوط سادهٔ `host:port`
 
-برای هر نود ابتدا یک بررسی سریع دسترسی انجام می‌شود؛ سپس اگر هستهٔ Xray فعال باشد، برای پروتکل‌های پشتیبانی‌شده **هندشیک واقعی** انجام می‌شود: یک هستهٔ موقت Xray با SOCKS محلی بالا می‌آید و یک درخواست HTTP/HTTPS واقعی از داخل تونل به URL تست زده می‌شود. نتیجهٔ هر نود شامل روش تست (Xray/TCP/TLS/UDP)، تأخیر، وضعیت و خطای دقیق در جزئیات مانیتور نمایش داده می‌شود.
+برای هر نود ابتدا یک بررسی سریع دسترسی انجام می‌شود؛ سپس اگر هستهٔ Xray فعال باشد، برای پروتکل‌های پشتیبانی‌شده **هندشیک واقعی** انجام می‌شود: یک هستهٔ موقت Xray با SOCKS محلی بالا می‌آید و یک درخواست HTTP/HTTPS واقعی از داخل تونل به URL تست زده می‌شود. نتیجهٔ هر نود شامل روش تست (Xray/TCP/TLS/UDP)، تأخیر، وضعیت و خطای دقیق در جزئیات مانیتور نمایش داده می‌شود. در نسخهٔ جدید اگر بررسی سریع TCP/TLS یک نود Reality/CDN/WebSocket را رد کند، تست واقعی Xray همچنان روی آن انجام می‌شود و نتیجهٔ نهایی را تعیین می‌کند.
 
 **نکته‌ها:**
 - VMess، VLESS، Trojan، Shadowsocks، WireGuard و SOCKS با Xray تست واقعی می‌شوند.
@@ -439,6 +507,7 @@ sudo bash -c 'set -a; . /etc/pulse/agent.env; set +a; /usr/local/bin/pulse --age
 - برای WireGuard واقعی، Xray در حالت userspace و بدون TUN تست می‌کند؛ PrivateKey، Address و Peer لازم است.
 - Reality با کلید عمومی (`pbk`) و ShortID واقعی تست می‌شود؛ بررسی اولیهٔ TCP فقط برای رد کردن سریع نودهای مرده است.
 - بررسی UDP در حالت fallback تقریبی است: timeout به معنی «رد نشدن فعال» در نظر گرفته می‌شود.
+- دکمهٔ **بررسی فوری** حالا تا پایان بررسی صبر می‌کند و نتیجهٔ تازه را نشان می‌دهد؛ برای کانفیگ‌های بزرگ تا حدود ۹۰ ثانیه ممکن است طول بکشد.
 
 ---
 
@@ -497,7 +566,7 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 | `GET` | `/api/summary` | خلاصه داشبورد، روند ۲۴ ساعته |
 | `GET/POST` | `/api/monitors` | فهرست/ساخت مانیتور |
 | `GET/PUT/DELETE` | `/api/monitors/{id}` | جزئیات/ویرایش/حذف |
-| `POST` | `/api/monitors/{id}/check` / `toggle` | بررسی فوری/توقف |
+| `POST` | `/api/monitors/{id}/check?wait=1` / `toggle` | بررسی فوری و انتظار برای نتیجه / توقف |
 | `GET` | `/api/monitors/{id}/checks` | تاریخچه بررسی |
 | `GET` | `/api/incidents` | رخدادها (`?active=1`) |
 | `POST` | `/api/incidents/{id}/resolve` | بستن دستی رخداد |
@@ -507,7 +576,8 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 | `PUT/DELETE` | `/api/agents/{id}` | ویرایش/حذف ایجنت |
 | `POST` | `/api/agents/{id}/rotate` | توکن جدید |
 | `GET` | `/api/agents/{id}/metrics` | نمودار منابع (`?hours=24`) |
-| `POST` | `/api/agent/report` | گزارش ایجنت — هدر `X-Agent-Token` |
+| `GET` | `/api/agent/hello` | هندشیک REST ایجنت — هدر `X-Agent-Token` یا `Authorization: Bearer` |
+| `POST` | `/api/agent/report` | گزارش ایجنت — REST/JSON با همان هدر توکن |
 | `GET` | `/api/cloudflare/status` / `zones` / `records` | وضعیت و داده‌های Cloudflare |
 | `POST` | `/api/cloudflare/update` | تغییر رکورد |
 | `GET/PUT` | `/api/settings` | تنظیمات (توکن‌ها بازخوانی نمی‌شوند) |
@@ -595,7 +665,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.2.0` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.3.0` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -634,8 +704,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 ---
@@ -652,6 +722,7 @@ git push origin v1.2.0
 | «database is locked» می‌بینید | پالس SQLite را با یک اتصال هم‌زمان اجرا می‌کند؛ این خطا در نسخه‌های فعلی نباید رخ دهد. فایل `.db-wal` را حذف نکنید و سرویس را ری‌استارت کنید. |
 | اعلان مرورگر مسدود است | از تنظیمات سایت، Notification را Allow کنید و دوباره «فعال‌سازی» را بزنید. |
 | فرمان نصب ایجنت آدرس اشتباه دارد | آدرس عمومی را در تنظیمات وارد کنید یا پنل را با Host صحیح باز کنید. |
+| Caddy با خطای `address already in use` روی 443 متوقف می‌شود | با `ss -ltnp \| grep ':443'` ببینید چه سرویسی پورت را گرفته است (مثلاً Xray). اگر Xray باید روی 443 بماند، در Caddyfile گزینهٔ `https_port 8443` را اضافه کنید و پورت 8443 را باز کنید؛ وگرنه سرویس اشغال‌کننده را جابه‌جا/متوقف کنید. |
 | Xray شناسایی نمی‌شود | با `xray version` از اجرای باینری مطمئن شوید، مسیر را در تنظیمات وارد کنید و «بررسی مجدد» را بزنید. در Docker، نسخهٔ Xray داخل تصویر نصب می‌شود. |
 | تست واقعی پروکسی ناموفق است | UUID/رمز/Reality، SNI و شبکه را بررسی کنید. URL تست باید از سمت سرور پروکسی در دسترس باشد. اگر پنل بدون Xray اجرا شود، مانیتور به‌جای سبز کاذب، وضعیت هشدار می‌گیرد. |
 | تست واقعی زمان‌بر است | تعداد «حداکثر نود برای تست واقعی» یا فاصلهٔ بررسی را کم/زیاد کنید؛ هر نود یک پروسهٔ Xray موقت دارد. |

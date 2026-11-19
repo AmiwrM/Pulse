@@ -363,8 +363,51 @@ func (a *App) handleCheckNow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "این مانیتور غیرفعال است")
 		return
 	}
-	a.startCheck(*m)
-	writeData(w, map[string]any{"started": true})
+	waitMode := r.URL.Query().Get("wait") == "1"
+	startedAt := time.Now().Unix()
+	if !a.startCheck(*m) {
+		writeErr(w, http.StatusConflict, "این مانیتور همین حالا در حال بررسی است")
+		return
+	}
+	if !waitMode {
+		writeData(w, map[string]any{"started": true})
+		return
+	}
+
+	// The UI's "check now" button waits for the result instead of leaving the
+	// user with an old node table after a proxy real-handshake test.
+	timeout := time.Duration(m.Timeout)*time.Millisecond + 10*time.Second
+	if timeout < 20*time.Second {
+		timeout = 20 * time.Second
+	}
+	if m.Type == "proxy" && timeout < 95*time.Second {
+		timeout = 95 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(600 * time.Millisecond):
+		}
+		fresh, err := a.db.GetMonitor(id)
+		if err != nil || fresh == nil {
+			continue
+		}
+		if fresh.LastCheckedAt >= startedAt {
+			checks, _ := a.db.ListChecks(id, 1)
+			var check *model.Check
+			if len(checks) > 0 {
+				check = &checks[0]
+			}
+			writeData(w, map[string]any{
+				"monitor": fresh,
+				"check":   check,
+			})
+			return
+		}
+	}
+	writeErr(w, http.StatusGatewayTimeout, "بررسی در زمان انتظار به پایان نرسید؛ چند لحظه بعد تاریخچه را دوباره ببینید")
 }
 
 func (a *App) handleMonitorChecks(w http.ResponseWriter, r *http.Request) {
@@ -426,8 +469,8 @@ func (a *App) startCheck(m model.Monitor) bool {
 		if timeout < 15*time.Second {
 			timeout = 15 * time.Second
 		}
-		if m.Type == "proxy" && timeout < 50*time.Second {
-			timeout = 50 * time.Second
+		if m.Type == "proxy" && timeout < 90*time.Second {
+			timeout = 90 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()

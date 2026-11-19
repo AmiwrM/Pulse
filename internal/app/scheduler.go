@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	"pulse/internal/model"
@@ -209,12 +208,7 @@ func (a *App) runCleanup() {
 }
 
 func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("X-Agent-Token")
-	if token == "" {
-		if auth := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-			token = strings.TrimSpace(auth[7:])
-		}
-	}
+	token := agentToken(r)
 	if token == "" {
 		writeErr(w, http.StatusUnauthorized, "توکن ایجنت ارسال نشده است")
 		return

@@ -36,7 +36,7 @@ type Manager struct {
 func New(defaultDNS string) *Manager {
 	return &Manager{
 		DefaultDNS:          defaultDNS,
-		UserAgent:           "Pulse/1.2 (+https://github.com/AmiwrM/Pulse)",
+		UserAgent:           "Pulse/1.3 (+https://github.com/AmiwrM/Pulse)",
 		defaultProxyTestURL: xray.DefaultTestURL,
 	}
 }

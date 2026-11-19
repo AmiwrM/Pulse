@@ -135,12 +135,24 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 				meta["real_test_error"] = errText
 				warnings = append(warnings, "تست واقعی Xray انجام نشد: "+errText)
 			} else {
+				// Run the authoritative Xray test for nodes that passed the fast
+				// probe first, then for nodes that failed it but still have enough
+				// protocol data for Xray. A TCP/TLS probe can fail on valid Reality,
+				// CDN, or WebSocket configurations; the real tunnel test is the
+				// source of truth, not the preliminary reachability probe.
 				candidates := []int{}
+				recovery := []int{}
 				for i := range nodes {
-					if nodes[i].OK && nodes[i].XrayNode != nil {
+					if nodes[i].XrayNode == nil {
+						continue
+					}
+					if nodes[i].OK {
 						candidates = append(candidates, i)
+					} else {
+						recovery = append(recovery, i)
 					}
 				}
+				candidates = append(candidates, recovery...)
 				maxReal := c.MaxRealNodes
 				if maxReal <= 0 {
 					maxReal = 10
@@ -154,7 +166,7 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 				}
 				meta["test_url"] = testURL
 				if len(candidates) == 0 {
-					meta["real_test_skipped"] = "هیچ نود سالمی برای تست واقعی وجود ندارد"
+					meta["real_test_skipped"] = "هیچ نودی برای تست واقعی Xray وجود ندارد"
 				} else {
 					selected := candidates
 					if len(selected) > maxReal {
@@ -247,7 +259,7 @@ func fetchSubscription(ctx context.Context, raw string, skipTLS bool) (string, e
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Pulse/1.0")
+	req.Header.Set("User-Agent", "Pulse/1.3")
 	client := &http.Client{
 		Timeout: 25 * time.Second,
 		Transport: &http.Transport{

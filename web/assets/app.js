@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=7';
+import { lineChart, sparkline } from './charts.js?v=8';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -172,9 +172,12 @@ const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   telegram: '<path d="m21 4-3 16-6-4-3 3v-5l9-7-11 6-3-1 17-8Z"/>',
   fire: '<path d="M12 22c4 0 7-2.8 7-7 0-3-1.5-5.5-4-8 .2 2.5-1 4-2 4-1.2 0-2-2-2-4.5C8 9 5 12 5 15c0 4.2 3 7 7 7Z"/>',
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/>',
+  signal: '<path d="M4 20v-4M9 20v-8M14 20V8M19 20V4"/>',
+  agent: '<rect x="3" y="4" width="18" height="7" rx="2"/><path d="M7 7.5h.01M11 7.5h.01"/><path d="M4 16h4l2-3 3 6 2-3h5"/>',
 };
 function icon(name, cls = '') {
-  return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.info}</svg>`;
+  return `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.info}</svg>`;
 }
 
 const TYPES = {
@@ -371,7 +374,7 @@ function renderAuth(mode, message = '') {
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.2.0')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.3.0')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -523,7 +526,7 @@ const VIEW_META = {
   dashboard: { title: 'داشبورد', crumb: 'مرکز فرمان', sub: 'نمای کلی زیرساخت', icon: 'dashboard' },
   monitors: { title: 'مانیتورها', crumb: 'پایش', sub: 'همه بررسی‌های فعال', icon: 'activity' },
   incidents: { title: 'رخدادها', crumb: 'پایش', sub: 'تاریخچه قطعی و بازیابی', icon: 'alert' },
-  servers: { title: 'سرورها', crumb: 'زیرساخت', sub: 'ایجنت‌ها و منابع', icon: 'server' },
+  servers: { title: 'سرورها', crumb: 'زیرساخت', sub: 'ایجنت‌ها و منابع', icon: 'agent' },
   rules: { title: 'قوانین', crumb: 'اتوماسیون', sub: 'موتور هوشمند هشدار', icon: 'sliders' },
   cloudflare: { title: 'کلادفلر', crumb: 'اتوماسیون', sub: 'DNS و سوییچ خودکار', icon: 'cloud' },
   notifications: { title: 'اعلان‌ها', crumb: 'ارتباط', sub: 'کانال‌ها و سابقه ارسال', icon: 'bell' },
@@ -985,6 +988,9 @@ async function openMonitorDetail(id, opts = {}) {
   const activeIncident = (m.active_incident || incidents.find((i) => i.ended_at === 0) || null);
 
   const nodes = Array.isArray(meta.nodes) ? meta.nodes : [];
+  const nodeMaxLatency = Math.max(1, ...nodes.map((n) => Number(n.latency_ms) || 0));
+  const nodeHealthy = Number(meta.healthy || nodes.filter((n) => n.ok).length);
+  const nodeHealthPct = nodes.length ? clamp((nodeHealthy / nodes.length) * 100, 0, 100) : 0;
   const resolved = Array.isArray(meta.resolved) ? meta.resolved : [];
   const configRows = [
     ['نوع', typeMeta(m.type).label],
@@ -1039,14 +1045,16 @@ async function openMonitorDetail(id, opts = {}) {
       <div class="uptime-legend"><span>${bars[0] ? dateShort(bars[0].dt.getTime() / 1000) : '—'}</span><span>امروز</span></div>
     </div>
     ${nodes.length ? `<div class="detail-chart">
-      <div class="detail-chart-head"><b>${icon('layers')} نودهای کانفیگ</b><span>${num(meta.healthy || 0)} از ${num(meta.total || nodes.length)} نود سالم${meta.xray_version ? ` · Xray ${esc(meta.xray_version)}` : ''}</span></div>
+      <div class="detail-chart-head"><b>${icon('layers')} نودهای کانفیگ</b><span>${num(nodeHealthy)} از ${num(meta.total || nodes.length)} نود سالم${meta.xray_version ? ` · Xray ${esc(meta.xray_version)}` : ''}</span></div>
       ${meta.real_test_requested ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center"><span class="chip ${meta.real_tested > 0 ? 'green' : 'amber'}">${icon('bolt')} هندشیک واقعی: ${num(meta.real_tested || 0)} تست، ${num(meta.real_passed || 0)} موفق</span>${meta.test_url ? `<span class="chip" title="${esc(meta.test_url)}">تست: ${esc(meta.test_url)}</span>` : ''}</div>` : ''}
+      <div class="node-health"><div class="node-health-bar"><span style="width:${nodeHealthPct}%"></span></div><span>${nf1.format(nodeHealthPct)}٪ کیفیت نودها</span></div>
       <div class="table-wrap"><table class="node-table"><thead><tr><th>نود</th><th>پروتکل</th><th>آدرس</th><th>روش</th><th>تأخیر</th><th>وضعیت</th></tr></thead><tbody>
         ${nodes.map((n) => {
           const method = n.real_tested ? 'Xray' : n.method === 'tls' ? 'TLS' : n.method === 'udp' ? 'UDP' : 'TCP';
           const methodClass = n.real_tested ? 'violet' : n.real_skipped ? 'amber' : 'cyan';
           const methodTitle = n.real_note || (n.real_tested ? 'هندشیک واقعی و درخواست HTTP از داخل تونل' : 'فقط بررسی دسترسی ترابری');
-          return `<tr><td class="node-name">${esc(n.name || '—')}</td><td>${esc(n.protocol || '—')}</td><td class="record-name">${esc(n.address || '—')}${n.tls ? ' · TLS' : ''}${n.udp ? ' · UDP' : ''}</td><td><span class="chip ${methodClass}" title="${esc(methodTitle)}">${method}</span></td><td class="node-lat">${n.ok ? num(n.latency_ms) + ' ms' : '—'}</td><td>${n.ok ? '<span class="chip green">سالم</span>' : `<span class="chip red" title="${esc(n.error || '')}">قطع</span>`}</td></tr>`;
+          const latPct = clamp(((Number(n.latency_ms) || 0) / nodeMaxLatency) * 100, 6, 100);
+          return `<tr><td class="node-name">${esc(n.name || '—')}</td><td>${esc(n.protocol || '—')}</td><td class="record-name">${esc(n.address || '—')}${n.tls ? ' · TLS' : ''}${n.udp ? ' · UDP' : ''}</td><td><span class="chip ${methodClass}" title="${esc(methodTitle)}">${method}</span></td><td class="node-lat">${n.ok ? `<span class="lat-meter"><i style="width:${latPct}%"></i></span><b>${num(n.latency_ms)} ms</b>` : '—'}</td><td>${n.ok ? '<span class="chip green">سالم</span>' : `<span class="chip red" title="${esc(n.error || '')}">قطع</span>`}</td></tr>`;
         }).join('')}
       </tbody></table></div>
     </div>` : ''}
@@ -1120,11 +1128,27 @@ function agentCard(a) {
   const services = Array.isArray(a.services) ? a.services : [];
   const wg = Array.isArray(a.wireguard) ? a.wireguard : [];
   const peers = wg.reduce((s, w) => s + (Array.isArray(w.peers) ? w.peers.length : 0), 0);
+  const age = a.last_seen ? Math.max(0, Date.now() / 1000 - Number(a.last_seen)) : null;
+  let quality = 'بدون گزارش';
+  let qualityClass = 'off';
+  if (online) {
+    if (age < 50) { quality = 'عالی'; qualityClass = 'great'; }
+    else if (age < 100) { quality = 'خوب'; qualityClass = 'good'; }
+    else { quality = 'متصل'; qualityClass = 'ok'; }
+  } else if (age !== null) {
+    quality = 'قطع';
+  }
+  const serviceOnline = services.filter((s) => s.active).length;
   return `<article class="panel agent-card" data-action="open-agent" data-id="${a.id}" role="button" tabindex="0">
     <div class="agent-head">
-      <div class="agent-ico">${icon('server')}</div>
+      <div class="agent-ico agent-ico-pulse">${icon('agent')}</div>
       <div class="agent-title"><div class="agent-name">${esc(a.name)}</div><div class="agent-host">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}</div></div>
       <span class="agent-online ${online ? '' : 'off'}"><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span>
+    </div>
+    <div class="agent-connection">
+      <span class="agent-quality ${qualityClass}">${icon('signal')} ${quality}</span>
+      <span class="chip cyan">REST</span>
+      <span class="agent-ip">${esc(a.ip || 'بدون IP')}</span>
     </div>
     <div class="gauges">
       ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU')}
@@ -1137,7 +1161,7 @@ function agentCard(a) {
       <div class="telemetry-item"><b style="direction:ltr">${a.net_rx_bps ? bytes(a.net_rx_bps) + '/s' : '—'}</b><span>دریافت</span></div>
     </div>
     ${services.length ? `<div class="service-chips">${services.slice(0, 5).map((s) => `<span class="service-chip ${s.active ? '' : 'off'}"><span class="dot"></span>${esc(s.name)}</span>`).join('')}${services.length > 5 ? `<span class="service-chip">+${num(services.length - 5)}</span>` : ''}</div>` : ''}
-    <div class="agent-foot"><span>${wg.length ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard` : online ? 'ایجنت متصل' : 'آخرین گزارش ' + timeAgo(a.last_seen)}</span><span>${a.version ? 'v' + fa(a.version) : ''} ${timeAgo(a.last_seen)}</span></div>
+    <div class="agent-foot"><span>${wg.length ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard` : services.length ? `${icon('sliders')} ${num(serviceOnline)} از ${num(services.length)} سرویس فعال` : online ? 'ارتباط REST برقرار است' : 'آخرین گزارش ' + timeAgo(a.last_seen)}</span><span>${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}</span></div>
   </article>`;
 }
 function renderServers() {
@@ -1150,12 +1174,12 @@ function renderServers() {
       <button class="btn btn-primary" type="button" data-action="new-agent">${icon('plus')} افزودن سرور</button>
     </div>
     ${agents.length ? `<div class="agent-grid">${agents.slice().sort((a, b) => Number(statusFromAgent(b)) - Number(statusFromAgent(a)) || a.name.localeCompare(b.name, 'fa')).map(agentCard).join('')}</div>` : `<div class="panel empty" style="margin-top:8px">
-      <div class="empty-ico">${icon('server')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۳۰ ثانیه به پالس گزارش شود.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px"><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button><button class="btn btn-sm" type="button" data-action="agent-guide">${icon('info')} راهنمای نصب</button></div>
+      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۳۰ ثانیه با REST به پالس گزارش شود.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px"><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button><button class="btn btn-sm" type="button" data-action="agent-guide">${icon('terminal')} نصب یک‌خطی</button></div>
     </div>`}
     <div class="banner" style="margin-top:16px">
-      <div class="banner-ico">${icon('bolt')}</div>
-      <div class="banner-body"><b>ایجنت بدون وابستگی</b><p>همان باینری پالس با فلگ <code style="font-family:var(--mono);font-size:9px;color:#9fdcff">--agent</code> اجرا می‌شود. نصب با یک فایل، بدون نیاز به Docker یا پکیج اضافه. پشتیبانی کامل از systemd و WireGuard.</p></div>
+      <div class="banner-ico">${icon('signal')}</div>
+      <div class="banner-body"><b>اتصال REST پایدار</b><p>ایجنت با هندشیک اولیه، keep-alive و backoff خودکار به پنل وصل می‌شود. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:#9fdcff">pulse-agent update</code>.</p></div>
     </div>`;
 }
 
@@ -1482,7 +1506,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.2.0')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.3.0')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -1796,13 +1820,12 @@ function openAgentGuide() {
     subtitle: 'پایش منابع سرور در کمتر از دو دقیقه',
     size: 'lg',
     body: `<div class="steps">
-      <div class="step"><span class="step-num">۱</span><p>یک ایجنت از همین صفحه بسازید تا <b>توکن اختصاصی</b> دریافت کنید. توکن فقط یک‌بار نمایش داده می‌شود.</p></div>
-      <div class="step"><span class="step-num">۲</span><p>فایل اجرایی <code>pulse</code> را روی سرور مقصد قرار دهید. می‌توانید از سرور اصلی کپی کنید یا باینری لینوکسی را بسازید:<br><code>GOOS=linux GOARCH=amd64 go build -o pulse ./cmd/pulse</code></p></div>
-      <div class="step"><span class="step-num">۳</span><p>یک‌بار برای تست اجرا کنید:<br><code>sudo ./pulse --agent --server https://panel.example.com --token TOKEN --name my-server --once</code></p></div>
-      <div class="step"><span class="step-num">۴</span><p>سرویس systemd را با دستور موجود در پنجرهٔ توکن بسازید و فعال کنید:<br><code>sudo systemctl enable --now pulse-agent</code></p></div>
-      <div class="step"><span class="step-num">۵</span><p>اختیاری: برای پایش سرویس‌ها، <code>--services "xray,wireguard"</code> و برای آمار WireGuard فلگ <code>--wg</code> را اضافه کنید.</p></div>
+      <div class="step"><span class="step-num">۱</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
+      <div class="step"><span class="step-num">۲</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
+      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال REST را با <code>pulse-agent status</code> ببین. گزارش‌ها هر ۳۰ ثانیه ارسال می‌شوند و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
     </div>
-    <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. ارتباط آن با پنل با توکن اختصاصی و در صورت HTTPS، رمزنگاری‌شده است.</div></div>`,
+    <div class="agent-rest-note">${icon('signal')} اتصال REST/JSON با هندشیک اولیه، keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
+    <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. توکن را در جای امن نگه دار.</div></div>`,
     footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">بستن</button><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button>`,
   });
 }
@@ -1816,20 +1839,25 @@ function openAgentForm() {
 }
 function openAgentToken(data, title = 'ایجنت آماده نصب است') {
   const unit = data.unit || '';
+  const install = data.install_command || data.command || '';
   openModal({
     title,
-    subtitle: 'توکن را فقط در محل امن نگهداری کنید',
+    subtitle: 'نصب REST با یک دستور روی VPS مقصد',
     size: 'lg',
     body: `<div class="warning-note" style="margin:0 0 12px">${icon('alert')} <div>این توکن فقط یک‌بار نمایش داده می‌شود. اگر گم شد، از داخل پنل توکن جدید بسازید.</div></div>
-      <div class="token-box"><b>AGENT TOKEN</b><code id="agent-token">${esc(data.token || '')}</code><button class="btn btn-sm btn-ghost" style="margin-top:6px" type="button" data-action="copy" data-copy-target="agent-token">${icon('copy')} کپی توکن</button></div>
-      ${data.download_command ? `<div style="margin-top:14px"><div class="form-section-title">${icon('download')} دریافت باینری</div><div class="code-block" id="agent-download">${esc(data.download_command)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-download">کپی</button></div></div>` : ''}
-      <div style="margin-top:14px"><div class="form-section-title">${icon('server')} اجرای سریع</div><div class="code-block" id="agent-cmd">${esc(data.command || '')}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-cmd">کپی</button></div></div>
-      <div style="margin-top:12px"><div class="form-section-title">${icon('server')} نصب به‌عنوان سرویس systemd</div><button class="copy-btn" style="position:static;margin-bottom:5px" type="button" data-action="copy" data-copy-target="agent-unit">کپی unit</button><div class="code-block" id="agent-unit">${esc(unit)}</div></div>
-      <div class="steps" style="margin-top:14px">
-        <div class="step"><span class="step-num">۱</span><p>باینری پالس را روی سرور مقصد قرار دهید و اجرا کنید: <code>./pulse --version</code></p></div>
-        <div class="step"><span class="step-num">۲</span><p>فایل <code>/etc/systemd/system/pulse-agent.service</code> را با محتوای بالا بسازید.</p></div>
-        <div class="step"><span class="step-num">۳</span><p>با <code>sudo systemctl enable --now pulse-agent</code> سرویس را فعال کنید.</p></div>
-      </div>`,
+      <div class="install-card">
+        <div class="install-card-head"><span class="install-badge">${icon('terminal')} نصب یک‌خطی</span><span class="chip green">REST</span></div>
+        <div class="code-block" id="agent-install">${esc(install)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-install">کپی</button></div>
+        <div class="install-help">روی VPS مقصد، با کاربر root اجرا کن. اسکریپت باینری را از GitHub Releases دانلود می‌کند، سرویس <code>pulse-agent</code> را می‌سازد و اتصال REST را با backoff خودکار بالا می‌آورد.</div>
+      </div>
+      <div class="token-box" style="margin-top:14px"><b>AGENT TOKEN</b><code id="agent-token">${esc(data.token || '')}</code><button class="btn btn-sm btn-ghost" style="margin-top:6px" type="button" data-action="copy" data-copy-target="agent-token">${icon('copy')} کپی توکن</button></div>
+      <div class="agent-rest-note">${icon('signal')} پروتکل ایجنت: REST/JSON · هندشیک اولیه + گزارش دوره‌ای + تلاش مجدد خودکار</div>
+      <details class="agent-manual">
+        <summary>${icon('sliders')} نصب دستی / عیب‌یابی پیشرفته</summary>
+        ${data.download_command ? `<div style="margin-top:10px"><div class="form-section-title">${icon('download')} دریافت باینری</div><div class="code-block" id="agent-download">${esc(data.download_command)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-download">کپی</button></div></div>` : ''}
+        <div style="margin-top:10px"><div class="form-section-title">${icon('server')} اجرای مستقیم</div><div class="code-block" id="agent-cmd">${esc(data.command || '')}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-cmd">کپی</button></div></div>
+        <div style="margin-top:10px"><div class="form-section-title">${icon('server')} سرویس systemd</div><button class="copy-btn" style="position:static;margin-bottom:5px" type="button" data-action="copy" data-copy-target="agent-unit">کپی unit</button><div class="code-block" id="agent-unit">${esc(unit)}</div></div>
+      </details>`,
     footer: `<button class="btn btn-primary btn-sm" type="button" data-action="close-modal">متوجه شدم</button>`,
   });
 }
@@ -1845,9 +1873,15 @@ async function openAgentDetail(id, opts = {}) {
   const wg = Array.isArray(a.wireguard) ? a.wireguard : [];
   const peers = wg.reduce((s, w) => s + (w.peers?.length || 0), 0);
   const body = `<div class="detail-hero">
-    <div class="agent-ico" style="width:46px;height:46px">${icon('server')}</div>
+    <div class="agent-ico agent-ico-pulse" style="width:46px;height:46px">${icon('agent')}</div>
     <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}"><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}${a.ip ? ' · ' + esc(a.ip) : ''}</div></div>
     <div class="detail-actions"><button class="btn btn-sm" type="button" data-action="edit-agent" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-soft" type="button" data-action="rotate-agent" data-id="${a.id}">${icon('key')} توکن جدید</button></div>
+  </div>
+  <div class="agent-connection detail-connection">
+    <span class="agent-quality ${online ? 'great' : 'off'}">${icon('signal')} ${online ? 'REST متصل' : 'قطع ارتباط'}</span>
+    <span class="chip cyan">JSON REST</span>
+    <span>آخرین گزارش: ${timeAgo(a.last_seen)}</span>
+    <span class="agent-update-hint">${icon('terminal')} <code>pulse-agent update</code></span>
   </div>
   <div class="gauges" style="padding:16px 0 8px">
     ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU')}
@@ -2060,8 +2094,25 @@ async function onDocumentClick(e) {
         break;
       }
       case 'check-monitor': {
-        await api(`/api/monitors/${id}/check`, { method: 'POST', body: {} });
-        toast('بررسی در صف اجرا قرار گرفت', 'success');
+        const original = actionEl.innerHTML;
+        const inDetail = location.hash.includes('/monitors/');
+        actionEl.disabled = true;
+        actionEl.classList.add('is-busy');
+        actionEl.innerHTML = `<span class="spin"></span> در حال تست…`;
+        try {
+          const res = await api(`/api/monitors/${id}/check?wait=1`, { method: 'POST', body: {} });
+          const status = res.check?.status || res.monitor?.status;
+          const labels = { up: 'سالم', degraded: 'هشدار', down: 'قطع', unknown: 'نامشخص' };
+          toast(`بررسی انجام شد${status ? ' — ' + (labels[status] || status) : ''}`, status === 'down' ? 'error' : 'success');
+          if (inDetail) await openMonitorDetail(id);
+          else if (state.view === 'monitors') await loadView('monitors', null, true);
+          else await route();
+        } catch (e) {
+          toast(e.message || 'بررسی مانیتور ناموفق بود', 'error');
+          actionEl.disabled = false;
+          actionEl.classList.remove('is-busy');
+          actionEl.innerHTML = original;
+        }
         break;
       }
       case 'toggle-monitor': {

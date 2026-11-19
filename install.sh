@@ -19,7 +19,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.2.0"
+INSTALLER_VERSION="1.3.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 BRANCH="${PULSE_BRANCH:-main}"
 REPO_URL="https://github.com/${REPO_SLUG}"
@@ -504,6 +504,8 @@ fi
 install -d -m 0750 -o pulse -g pulse /var/lib/pulse
 install -d -m 0755 -o root -g root /etc/pulse
 install -m 0755 "$PULSE_SRC" /usr/local/bin/pulse
+ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
+ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
 INSTALLED_VERSION="$(/usr/local/bin/pulse --version 2>/dev/null | sed -n '1p' || echo 'pulse')"
 
 if [[ "$USE_SSL" == "yes" ]]; then
@@ -735,8 +737,12 @@ echo "   2. Settings -> Xray Core -> Check again."
 echo "   3. Add your first monitor and configure Telegram / Cloudflare."
 echo
 echo " Useful commands:"
-echo "   systemctl status pulse --no-pager"
-echo "   journalctl -u pulse -f"
+echo "   pulse status"
+echo "   pulse restart"
+echo "   pulse logs"
+echo "   pulse update"
+echo "   pulse-agent status"
+echo "   pulse-agent update"
 if [[ "$USE_SSL" == "yes" ]]; then echo "   journalctl -u caddy -f"; fi
 echo "   Source: $REPO_URL"
 echo "   Open ports 80/443 in your provider firewall when using HTTPS."
