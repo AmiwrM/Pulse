@@ -259,7 +259,7 @@ func fetchSubscription(ctx context.Context, raw string, skipTLS bool) (string, e
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Pulse/1.3")
+	req.Header.Set("User-Agent", "Pulse/1.4")
 	client := &http.Client{
 		Timeout: 25 * time.Second,
 		Transport: &http.Transport{
