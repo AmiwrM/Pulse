@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=8';
+import { lineChart, sparkline } from './charts.js?v=9';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -175,10 +175,40 @@ const ICONS = {
   terminal: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/>',
   signal: '<path d="M4 20v-4M9 20v-8M14 20V8M19 20V4"/>',
   agent: '<rect x="3" y="4" width="18" height="7" rx="2"/><path d="M7 7.5h.01M11 7.5h.01"/><path d="M4 16h4l2-3 3 6 2-3h5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"/>',
 };
 function icon(name, cls = '') {
   return `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.info}</svg>`;
 }
+
+const THEME_KEY = 'pulse-theme';
+function applyTheme(theme, persist = true) {
+  theme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.setAttribute('content', theme === 'light' ? '#f4f8ff' : '#060a14');
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage may be disabled */ }
+  }
+  const btn = document.getElementById('theme-toggle');
+  if (btn) {
+    const light = theme === 'light';
+    btn.innerHTML = icon(light ? 'moon' : 'sun');
+    btn.title = light ? 'حالت تیره' : 'حالت روشن';
+    btn.setAttribute('aria-label', light ? 'تغییر به حالت تیره' : 'تغییر به حالت روشن');
+    btn.setAttribute('aria-pressed', light ? 'true' : 'false');
+  }
+  document.querySelectorAll('canvas').forEach((canvas) => {
+    if (typeof canvas._pulseDraw === 'function') canvas._pulseDraw();
+  });
+}
+function initTheme() {
+  let saved = '';
+  try { saved = localStorage.getItem(THEME_KEY) || ''; } catch { /* ignore */ }
+  applyTheme(saved || 'dark', false);
+}
+initTheme();
 
 const TYPES = {
   http: { label: 'وب‌سایت / HTTP', short: 'HTTP', icon: 'globe', color: '#38bdf8' },
@@ -505,6 +535,31 @@ function handleSSE(msg) {
   }
   if (type === 'toast') {
     toast(msg.data?.message || '', msg.data?.level || 'info');
+  }
+  if (type === 'agent.updated') {
+    const d = msg.data || {};
+    const a = state.agents.find((item) => Number(item.id) === Number(d.agent_id));
+    if (a) {
+      a.cpu_pct = d.cpu ?? a.cpu_pct;
+      a.ram_pct = d.ram ?? a.ram_pct;
+      a.disk_pct = d.disk ?? a.disk_pct;
+      a.load1 = d.load1 ?? a.load1;
+      a.net_rx_bps = d.net_rx_bps ?? a.net_rx_bps;
+      a.net_tx_bps = d.net_tx_bps ?? a.net_tx_bps;
+      a.ram_total = d.ram_total ?? a.ram_total;
+      a.disk_total = d.disk_total ?? a.disk_total;
+      a.version = d.version || a.version;
+      a.hostname = d.hostname || a.hostname;
+      a.os = d.os || a.os;
+      a.last_seen = d.last_seen || a.last_seen;
+      if (state.summary?.stats) {
+        state.summary.stats.agents_online = state.agents.filter(statusFromAgent).length;
+      }
+      if (!state.modal && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+        if (state.view === 'servers') { renderServers(); updateBadges(); return; }
+        if (state.view === 'dashboard') { renderDashboard(); updateBadges(); return; }
+      }
+    }
   }
   scheduleRefresh();
 }
@@ -1174,7 +1229,7 @@ function renderServers() {
       <button class="btn btn-primary" type="button" data-action="new-agent">${icon('plus')} افزودن سرور</button>
     </div>
     ${agents.length ? `<div class="agent-grid">${agents.slice().sort((a, b) => Number(statusFromAgent(b)) - Number(statusFromAgent(a)) || a.name.localeCompare(b.name, 'fa')).map(agentCard).join('')}</div>` : `<div class="panel empty" style="margin-top:8px">
-      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۳۰ ثانیه با REST به پالس گزارش شود.</p>
+      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۵ ثانیه با REST به پالس گزارش شود.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px"><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button><button class="btn btn-sm" type="button" data-action="agent-guide">${icon('terminal')} نصب یک‌خطی</button></div>
     </div>`}
     <div class="banner" style="margin-top:16px">
@@ -1822,7 +1877,7 @@ function openAgentGuide() {
     body: `<div class="steps">
       <div class="step"><span class="step-num">۱</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
       <div class="step"><span class="step-num">۲</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
-      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال REST را با <code>pulse-agent status</code> ببین. گزارش‌ها هر ۳۰ ثانیه ارسال می‌شوند و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
+      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال REST را با <code>pulse-agent status</code> ببین. گزارش‌ها هر ۵ ثانیه ارسال می‌شوند و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
     </div>
     <div class="agent-rest-note">${icon('signal')} اتصال REST/JSON با هندشیک اولیه، keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
     <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. توکن را در جای امن نگه دار.</div></div>`,
@@ -2091,6 +2146,10 @@ async function onDocumentClick(e) {
       case 'open-agent': {
         const aid = Number(actionEl.dataset.id) || id;
         if (aid) goTo(`#/servers/${aid}`);
+        break;
+      }
+      case 'toggle-theme': {
+        applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
         break;
       }
       case 'check-monitor': {

@@ -5,6 +5,7 @@
 - Agent transport upgraded to a resilient REST/JSON client with a typed
   `/api/agent/hello` handshake, keep-alive, request timeouts, jittered
   exponential backoff and automatic reconnect after panel/network outages.
+  Reports now default to a 5-second interval and server cards update live over SSE.
 - Agent installation is now a single command generated directly in the panel.
   The token is stored in `/etc/pulse/agent.env`; it is no longer embedded in
   the systemd unit.
@@ -18,9 +19,9 @@
   increased to match real-handshake cost.
 - The **Check now** button now waits for the result and refreshes the monitor
   instead of only queueing a background check.
-- UI polish: consistent line-icon set, agent connection-quality cards, REST
-  status, one-line install panel, proxy node health/latency meters and improved
-  busy/loading states.
+- UI polish: persistent light/dark theme toggle, consistent line-icon set, softer
+  global halos, layered shadows, agent connection-quality cards, REST status,
+  one-line install panel, proxy node health/latency meters and improved busy/loading states.
 - Release/install documentation updated for v1.3.0.
 
 ## 1.2.0

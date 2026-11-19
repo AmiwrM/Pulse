@@ -271,8 +271,8 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 		logger = slog.Default()
 	}
 	interval := opts.Interval
-	if interval < 10*time.Second {
-		interval = 30 * time.Second
+	if interval < 2*time.Second {
+		interval = 5 * time.Second
 	}
 	server := strings.TrimRight(strings.TrimSpace(opts.Server), "/")
 	if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {

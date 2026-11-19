@@ -5,6 +5,19 @@ const fmtTime = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-d
 const fmtDateTime = new Intl.DateTimeFormat('fa-IR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const fmtNum = new Intl.NumberFormat('fa-IR');
 
+function ink() {
+  const light = document.documentElement.dataset.theme === 'light';
+  return {
+    light,
+    label: light ? 'rgba(58,84,120,.82)' : 'rgba(135,151,183,.72)',
+    labelSoft: light ? 'rgba(58,84,120,.68)' : 'rgba(135,151,183,.6)',
+    grid: light ? 'rgba(35,65,110,.10)' : 'rgba(147,178,255,.08)',
+    gridSoft: light ? 'rgba(35,65,110,.08)' : 'rgba(130,160,220,.16)',
+    hover: light ? 'rgba(35,65,110,.18)' : 'rgba(147,178,255,.18)',
+    dot: light ? '#f8fbff' : '#070d1a',
+  };
+}
+
 function prep(canvas) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const rect = canvas.getBoundingClientRect();
@@ -78,6 +91,7 @@ export function lineChart(canvas, options = {}) {
   function draw() {
     const { ctx, w, h } = prep(canvas);
     if (!series.length) return;
+    const theme = ink();
     const axis = { t: 8, r: 10, b: 22, l: options.yAxis === false ? 10 : 42 };
     const cw = Math.max(10, w - axis.l - axis.r);
     const ch = Math.max(10, h - axis.t - axis.b);
@@ -92,8 +106,8 @@ export function lineChart(canvas, options = {}) {
     const Y = (y) => axis.t + ch - (Math.min(y, yMax) / yMax) * ch;
 
     ctx.font = '9px IRANSans, Tahoma, sans-serif';
-    ctx.fillStyle = 'rgba(135,151,183,.72)';
-    ctx.strokeStyle = 'rgba(147,178,255,.08)';
+    ctx.fillStyle = theme.label;
+    ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
     const ticks = 4;
     for (let i = 0; i <= ticks; i++) {
@@ -120,7 +134,7 @@ export function lineChart(canvas, options = {}) {
         const t = minX + (spanX / (labelCount - 1 || 1)) * i;
         const x = X(t);
         const label = options.xFormat ? options.xFormat(t) : fmtTime.format(new Date(t * 1000));
-        ctx.fillStyle = 'rgba(135,151,183,.6)';
+        ctx.fillStyle = theme.labelSoft;
         ctx.fillText(label, Math.max(axis.l + 14, Math.min(x, axis.l + cw - 14)), axis.t + ch + 9);
       }
     }
@@ -165,7 +179,7 @@ export function lineChart(canvas, options = {}) {
       const p = base[Math.min(hoverIndex, base.length - 1)];
       if (p) {
         const hx = X(p.x);
-        ctx.strokeStyle = 'rgba(147,178,255,.18)';
+        ctx.strokeStyle = theme.hover;
         ctx.beginPath();
         ctx.moveTo(hx, axis.t);
         ctx.lineTo(hx, axis.t + ch);
@@ -177,7 +191,7 @@ export function lineChart(canvas, options = {}) {
           const cy = Y(match.y);
           ctx.beginPath();
           ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
-          ctx.fillStyle = '#070d1a';
+          ctx.fillStyle = theme.dot;
           ctx.fill();
           ctx.beginPath();
           ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
@@ -258,8 +272,9 @@ export function sparkline(canvas, values, color = '#38bdf8') {
   const data = (values || []).map(Number).filter((v) => Number.isFinite(v));
   watch(canvas, () => {
     const { ctx, w, h } = prep(canvas);
+    const theme = ink();
     if (!data.length) {
-      ctx.strokeStyle = 'rgba(130,160,220,.16)';
+      ctx.strokeStyle = theme.gridSoft;
       ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.moveTo(4, h / 2);

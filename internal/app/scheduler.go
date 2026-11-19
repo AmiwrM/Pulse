@@ -252,7 +252,10 @@ func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	ag.WireGuard = report.WireGuard
 
 	a.hub.broadcast("agent.updated", map[string]any{
-		"agent_id": ag.ID, "cpu": ag.CPUPct, "ram": ag.RAMPct, "disk": ag.DiskPct, "last_seen": ag.LastSeen,
+		"agent_id": ag.ID, "name": ag.Name, "hostname": ag.Hostname, "os": ag.OS,
+		"cpu": ag.CPUPct, "ram": ag.RAMPct, "disk": ag.DiskPct, "load1": ag.Load1,
+		"net_rx_bps": ag.NetRx, "net_tx_bps": ag.NetTx, "ram_total": ag.RAMTotal,
+		"disk_total": ag.DiskTotal, "version": ag.Version, "last_seen": ag.LastSeen,
 	})
 	// Threshold rules are evaluated on every report. The rule engine applies the
 	// per-rule threshold and cooldown, so lower thresholds than 80% still work.
