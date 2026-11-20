@@ -4,7 +4,7 @@ services:
       context: .
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-        VERSION: ${PULSE_VERSION:-1.4.2}
+        VERSION: ${PULSE_VERSION:-1.4.3}
         XRAY_VERSION: ${XRAY_VERSION:-v26.11.9}
         XRAY_DOWNLOAD_URL: ${XRAY_DOWNLOAD_URL:-}
     image: pulse-monitor:${PULSE_VERSION:-latest}

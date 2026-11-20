@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=14';
+import { lineChart, sparkline } from './charts.js?v=15';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -460,7 +460,7 @@ function renderAuth(mode, message = '') {
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.2')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.3')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -895,7 +895,7 @@ function monitorCard(m, options = {}) {
   const spark = (m.spark || []).slice(-28);
   const warn = sslBadge(m);
   const active = m.active_incident;
-  return `<article class="panel monitor-card ${esc(status)}" data-action="open-monitor" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.name)}">
+  return `<article class="panel monitor-card ${esc(status)}" data-action="open-monitor" data-id="${m.id}" tabindex="0" role="button">
     <div class="mc-top">${typeChip(m.type)}<div style="display:flex;gap:5px;align-items:center">${warn}${statusPill(status)}</div></div>
     <div class="mc-name" title="${esc(m.name)}">${esc(m.name)}</div>
     <div class="mc-target" title="${esc(m.target)}">${esc(m.target)}</div>
@@ -1888,7 +1888,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.2')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.3')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>

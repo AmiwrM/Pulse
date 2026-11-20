@@ -219,7 +219,7 @@ img, svg, canvas { display: block; }
 .view { flex: 1; padding-bottom: 40px; animation: viewIn .45s cubic-bezier(.22, .8, .25, 1); }
 @keyframes viewIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 0 24px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10.5px; }
-.footer-links { display: flex; align-items: center; gap: 18px; }
+.footer-links { display: flex; align-items: center; gap: 18px; color: var(--muted); }
 .footer-status { display: flex; align-items: center; gap: 6px; }
 .footer-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .footer-status.bad .dot { background: var(--red); }
@@ -231,7 +231,7 @@ img, svg, canvas { display: block; }
 .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin: 30px 0 14px; }
 .section-head h2 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .section-head h2 .dot-mark { width: 6px; height: 18px; border-radius: 6px; background: linear-gradient(180deg, var(--cyan), var(--violet)); box-shadow: 0 0 12px rgba(56, 189, 248, .5); }
-.section-head p { color: var(--faint); font-size: 11.5px; margin-top: 2px; }
+.section-head p { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
 .section-head .head-actions { display: flex; gap: 8px; align-items: center; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; padding: 0 16px; border-radius: 11px; border: 1px solid var(--line); background: rgba(130, 160, 220, .06); color: var(--text-soft); font-size: 12.5px; font-weight: 500; transition: .2s; white-space: nowrap; }
 .btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -610,13 +610,20 @@ input[type="range"] { accent-color: #0ea5e9; height: 4px; width: 100%; }
 .token-box code { font-family: var(--mono); font-size: 10px; color: #fde68a; word-break: break-all; direction: ltr; display: block; }
 
 /* ------------------------------------------------------------------ modal */
-.modal-root { position: fixed; inset: 0; z-index: 80; }
-.modal-backdrop { position: fixed; inset: 0; background: rgba(3, 6, 13, .72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 24px; animation: fadeIn .2s ease; }
+.modal-root { position: fixed; inset: 0; z-index: 80; pointer-events: none; }
+.modal-root .modal-backdrop { pointer-events: auto; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(3, 6, 13, .78); display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* Note: do not put backdrop-filter on the modal backdrop. In Chromium it can
+   create a composited backdrop root that paints the backdrop (and the page)
+   over the dialog surface, making modals look transparent. */
 @keyframes fadeIn { from { opacity: 0; } }
-.modal { position: relative; width: min(620px, 100%); max-height: min(88vh, 900px); display: flex; flex-direction: column; background: linear-gradient(160deg, #0f192d, #080d19 70%); border: 1px solid var(--line-strong); border-radius: 22px; box-shadow: 0 40px 120px -30px rgba(0, 0, 0, .95); animation: modalIn .3s cubic-bezier(.22, .8, .25, 1); overflow: hidden; }
+.modal { position: relative; width: min(620px, 100%); max-height: min(88vh, 900px); display: flex; flex-direction: column; background: linear-gradient(160deg, #0f192d, #080d19 70%); border: 1px solid var(--line-strong); border-radius: 22px; box-shadow: 0 40px 120px -30px rgba(0, 0, 0, .95); animation: modalPop .26s cubic-bezier(.22, .8, .25, 1); overflow: hidden; }
 .modal.lg { width: min(920px, 100%); }
 .modal.sm { width: min(420px, 100%); }
-@keyframes modalIn { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
+/* Keep the surface opaque from the first frame. Fading the whole modal from
+   opacity 0 made it look transparent if the user opened it and took a
+   screenshot before the animation ended. Only the position is animated now. */
+@keyframes modalPop { from { transform: translateY(14px) scale(.985); } to { transform: none; } }
 .modal-head { display: flex; align-items: flex-start; gap: 12px; padding: 19px 22px 14px; border-bottom: 1px solid var(--line); background: rgba(10, 16, 30, .5); }
 .modal-head-copy { flex: 1; min-width: 0; }
 .modal-head h3 { font-size: 15.5px; font-weight: 650; }
@@ -721,7 +728,7 @@ body.modal-open { overflow: hidden; }
 .toast-title { font-size: 10.5px; font-weight: 600; }
 .toast-msg { font-size: 10px; color: var(--muted); margin-top: 1px; line-height: 1.6; word-break: break-word; }
 .toast-close { background: none; border: 0; color: var(--faint); font-size: 14px; line-height: 1; padding: 0 2px; }
-.user-pop { position: fixed; z-index: 60; top: 70px; inset-inline-end: 30px; width: 220px; padding: 7px; border-radius: 13px; border: 1px solid var(--line-strong); background: rgba(10, 16, 30, .98); box-shadow: var(--shadow-lg); backdrop-filter: blur(18px); animation: modalIn .2s ease; }
+.user-pop { position: fixed; z-index: 60; top: 70px; inset-inline-end: 30px; width: 220px; padding: 7px; border-radius: 13px; border: 1px solid var(--line-strong); background: rgba(10, 16, 30, .98); box-shadow: var(--shadow-lg); backdrop-filter: blur(18px); animation: modalPop .2s ease; }
 .user-pop-head { padding: 8px 9px 10px; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
 .user-pop-head b { display: block; font-size: 11.5px; }
 .user-pop-head span { font-size: 9px; color: var(--faint); }
@@ -1061,7 +1068,7 @@ html[data-theme="light"] .overview-copy p { color: var(--muted); }
 html[data-theme="light"] .gauge-center b { color: var(--text); }
 html[data-theme="light"] .gauge-center span, html[data-theme="light"] .gauge-caption { color: var(--muted); }
 html[data-theme="light"] .eyebrow { color: #0369a1; border-color: rgba(14, 165, 233, .18); background: rgba(14, 165, 233, .07); }
-html[data-theme="light"] .modal-backdrop { background: rgba(30, 55, 90, .35); }
+html[data-theme="light"] .modal-backdrop { background: rgba(30, 55, 90, .52); }
 html[data-theme="light"] .modal { background: linear-gradient(160deg, #ffffff, #f4f9ff 70%); }
 html[data-theme="light"] .modal-head { background: rgba(255, 255, 255, .8); }
 html[data-theme="light"] .modal-foot { background: rgba(245, 249, 255, .9); }

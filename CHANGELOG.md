@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.3
+
+- Fixed the root cause of transparent-looking modals: `#modal-root` was
+  missing its `modal-root` class, so it had no stacking layer above the app.
+  Page cards were painting over modal dialogs. The root now has the proper
+  z-index and pointer-event handling.
+- Removed the whole-dialog opacity fade and backdrop blur that made the
+  problem much more visible in screenshots; dialogs now have an opaque
+  surface and only a short position animation.
+- Version bump so the VPS can pull the fix with `pulse update`.
+
 ## 1.4.2
 
 - Full UI audit and bug-fix pass: oversized icons, light-theme hero/tooltips,

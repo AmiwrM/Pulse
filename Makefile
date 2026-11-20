@@ -1,5 +1,5 @@
 GO ?= go
-VERSION ?= 1.4.2
+VERSION ?= 1.4.3
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: build run test fmt vet tidy linux release clean docker installer-check
