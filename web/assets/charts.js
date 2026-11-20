@@ -76,6 +76,7 @@ function niceMax(v) {
 }
 
 export function lineChart(canvas, options = {}) {
+  if (!canvas) return;
   const series = (options.series || []).map((s) => ({
     name: s.name || '',
     color: s.color || '#38bdf8',
@@ -269,6 +270,7 @@ export function lineChart(canvas, options = {}) {
 }
 
 export function sparkline(canvas, values, color = '#38bdf8') {
+  if (!canvas) return;
   const data = (values || []).map(Number).filter((v) => Number.isFinite(v));
   watch(canvas, () => {
     const { ctx, w, h } = prep(canvas);

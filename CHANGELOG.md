@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.2
+
+- Full UI audit and bug-fix pass: oversized icons, light-theme hero/tooltips,
+  tablet hero overlap, mobile delete actions and DNS columns, and light-theme
+  danger/soft buttons.
+- Fixed route/detail refresh races, stale detail modals, modal/confirm cleanup,
+  focus handling, keyboard card activation, and SSE reconnect refreshes.
+- Cloudflare disabled state can now be re-enabled without re-entering the token;
+  zones/records failures and out-of-order zone changes show correct state.
+- Preserved unsaved Telegram/Webhook/Settings drafts while saving sibling forms;
+  test notifications refresh history.
+- Badge counts now load outside the dashboard; degraded monitors are counted
+  correctly; active incident badges update immediately.
+- Live agent detail modal updates over SSE; agent cards/gauges continue to patch
+  in place at 1-second intervals.
+- Service worker caching is safer and cache names are aligned with the app version.
+
 ## 1.4.1
 
 - Agent live reports now default to **1 second**; server cards update in place

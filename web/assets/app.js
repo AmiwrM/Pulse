@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=13';
+import { lineChart, sparkline } from './charts.js?v=14';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -25,6 +25,7 @@ const state = {
   cfRecordType: '',
   cfSearch: '',
   cfError: '',
+  cfZoneSeq: 0,
   pushConfig: null,
   notifications: [],
   audit: [],
@@ -37,10 +38,14 @@ const state = {
   refreshTimer: null,
   pendingRefresh: false,
   modal: null,
+  modalReturnFocus: null,
+  confirm: null,
   clockTimer: null,
   userMenu: null,
   installPrompt: null,
   booted: false,
+  viewEpoch: 0,
+  detailEpoch: 0,
 };
 
 /* ------------------------------------------------------------------ format */
@@ -219,6 +224,10 @@ const TYPES = {
   proxy: { label: 'کانفیگ پروکسی', short: 'PROXY', icon: 'layers', color: '#f472b6' },
 };
 
+function cleanRuleName(name) {
+  return String(name || '').replace(/^[^\p{L}\p{N}]+/u, '').trim() || String(name || '');
+}
+
 const TRIGGERS = {
   down: { label: 'قطع سرویس', icon: 'alert', tone: 'down', desc: 'وقتی یک مانیتور پس از رسیدن به آستانهٔ خطا قطع می‌شود.' },
   up: { label: 'بازیابی سرویس', icon: 'check', tone: 'up', desc: 'وقتی سرویس قطع‌شده دوباره سالم می‌شود.' },
@@ -241,16 +250,27 @@ async function api(path, options = {}) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(options.body);
   }
+  const timeout = options.timeout === undefined ? 30000 : Number(options.timeout);
+  let timer = null;
+  if (timeout > 0) {
+    const controller = new AbortController();
+    opts.signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), timeout);
+  }
   let res;
   try {
     res = await fetch(path, opts);
   } catch (e) {
+    if (e?.name === 'AbortError') throw new ApiError('پاسخ سرور بیش از حد طول کشید؛ دوباره تلاش کنید.', 0);
     throw new ApiError('ارتباط با سرور برقرار نشد. اتصال شبکه را بررسی کنید.', 0);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   const text = await res.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* non-json */ }
-  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+  const publicAuth = ['/api/auth/login', '/api/auth/setup', '/api/auth/state'];
+  if (res.status === 401 && !publicAuth.includes(path)) {
     sessionExpired();
     throw new ApiError('نشست شما منقضی شده است', 401);
   }
@@ -278,6 +298,7 @@ function toast(message, type = 'info', title = '') {
 /* ------------------------------------------------------------------ modal */
 function openModal({ title, subtitle = '', body = '', footer = '', size = '', onClose = null }) {
   closeModal(true);
+  state.modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const root = $('#modal-root');
   root.innerHTML = `<div class="modal-backdrop"><div class="modal ${size}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <div class="modal-head">
@@ -292,32 +313,49 @@ function openModal({ title, subtitle = '', body = '', footer = '', size = '', on
   state.modal = { onClose };
   document.body.classList.add('modal-open');
   wireLabels(root);
-  const first = root.querySelector('input:not([type=hidden]), select, textarea, button');
-  setTimeout(() => { if (first) first.focus({ preventScroll: true }); }, 80);
+  const first = root.querySelector('.modal-body input:not([type=hidden]), .modal-body select, .modal-body textarea, .modal-body button') || root.querySelector('.modal-close');
+  setTimeout(() => { if (first?.isConnected) first.focus({ preventScroll: true }); }, 80);
 }
 function closeModal(silent = false) {
   const root = $('#modal-root');
   if (!root) return;
+  const returnFocus = state.modalReturnFocus;
   root.innerHTML = '';
   document.body.classList.remove('modal-open');
   const cb = state.modal?.onClose;
   state.modal = null;
+  state.modalReturnFocus = null;
   if (!silent && typeof cb === 'function') cb();
-  if (state.pendingRefresh) { state.pendingRefresh = false; refreshCurrent(true); }
+  if (!silent && returnFocus?.isConnected) {
+    try { returnFocus.focus({ preventScroll: true }); } catch { /* ignore */ }
+  }
+  if (!silent && state.pendingRefresh) {
+    state.pendingRefresh = false;
+    if (state.auth?.authenticated && LIVE_VIEWS.has(state.view)) refreshCurrent(true);
+  }
 }
 
 function confirmAction({ title = 'تأیید', message, confirmText = 'تأیید', danger = false }) {
+  closeConfirm();
   return new Promise((resolve) => {
     const el = document.createElement('div');
     el.className = 'modal-backdrop';
     el.style.zIndex = '95';
-    el.innerHTML = `<div class="modal sm" role="alertdialog" aria-modal="true">
+    el.innerHTML = `<div class="modal sm" role="alertdialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="modal-head"><div class="modal-head-copy"><h3>${esc(title)}</h3></div></div>
       <div class="modal-body"><p style="font-size:12px;color:var(--text-soft);line-height:2">${esc(message)}</p></div>
       <div class="modal-foot"><button class="btn btn-ghost" data-x="no" type="button">انصراف</button><button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-x="yes" type="button">${esc(confirmText)}</button></div>
     </div>`;
     document.body.appendChild(el);
-    const done = (value) => { el.remove(); resolve(value); };
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      if (state.confirm?.el === el) state.confirm = null;
+      el.remove();
+      resolve(value);
+    };
+    state.confirm = { el, finish: done };
     el.addEventListener('click', (e) => {
       if (e.target === el) done(false);
       if (e.target.closest('[data-x="no"]')) done(false);
@@ -327,15 +365,23 @@ function confirmAction({ title = 'تأیید', message, confirmText = 'تأیی�
   });
 }
 
+function closeConfirm() {
+  const c = state.confirm;
+  if (!c) return;
+  c.finish(false);
+}
+
 /* ------------------------------------------------------------------ session / auth */
 async function init() {
   startClock();
   bindGlobalEvents();
   registerServiceWorker();
   let auth = null;
+  let bootError = '';
   try {
     auth = await api('/api/auth/state');
-  } catch {
+  } catch (e) {
+    bootError = e?.message || 'ارتباط با سرور برقرار نشد.';
     auth = { needs_setup: false, authenticated: false, version: '', site_title: 'پالس' };
   }
   state.auth = auth;
@@ -343,7 +389,7 @@ async function init() {
   if (auth.needs_setup) {
     renderAuth('setup');
   } else if (!auth.authenticated) {
-    renderAuth('login');
+    renderAuth('login', bootError);
   } else {
     startApp();
   }
@@ -361,6 +407,16 @@ function startApp() {
     history.replaceState(null, '', '#/dashboard');
   }
   route();
+  warmSummary();
+}
+
+function warmSummary() {
+  api('/api/summary').then((summary) => {
+    if (!summary || !state.auth?.authenticated) return;
+    state.summary = summary;
+    if (state.view === 'monitors' && !state.monitors.length) state.monitors = summary.monitors || [];
+    updateBadges();
+  }).catch(() => { /* the visible page already shows its own error */ });
 }
 
 function renderAuth(mode, message = '') {
@@ -398,13 +454,13 @@ function renderAuth(mode, message = '') {
         <div class="form-error ${err ? 'show' : ''}" data-auth-error>${esc(err)}</div>
         <div class="field"><label for="auth-user">نام کاربری</label><input class="input" style="direction:ltr;text-align:left" id="auth-user" name="username" autocomplete="username" value="${isSetup ? 'admin' : ''}" placeholder="admin" required></div>
         <div class="field"><label for="auth-pass">رمز عبور</label>
-          <div class="password-wrap"><input class="input" style="direction:ltr;text-align:left" id="auth-pass" name="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" placeholder="••••••••" required><button class="password-toggle" type="button" data-action="toggle-password">${icon('eye')}</button></div>
+          <div class="password-wrap"><input class="input" style="direction:ltr;text-align:left" id="auth-pass" name="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" placeholder="••••••••" required><button class="password-toggle" type="button" data-action="toggle-password" aria-label="نمایش یا مخفی کردن رمز">${icon('eye')}</button></div>
           ${isSetup ? '<div class="auth-strength" id="auth-strength"><span></span><span></span><span></span><span></span></div>' : ''}
         </div>
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.1')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.2')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -431,7 +487,9 @@ function sessionExpired() {
   state.auth = { ...state.auth, authenticated: false };
   if (state.sse) { state.sse.close(); state.sse = null; }
   setLive(false);
+  closeConfirm();
   closeModal(true);
+  closeUserMenu();
   renderAuth('login', 'نشست شما منقضی شده است؛ دوباره وارد شوید.');
 }
 
@@ -441,6 +499,7 @@ async function logout() {
   if (state.sse) { state.sse.close(); state.sse = null; }
   setLive(false);
   closeUserMenu();
+  closeConfirm();
   closeModal(true);
   renderAuth('login');
 }
@@ -504,6 +563,8 @@ function setLive(on) {
     fs.classList.toggle('bad', !on);
     fs.innerHTML = `<span class="dot"></span> ${on ? 'متصل' : 'قطع'}`;
   }
+  const brandLive = $('#brand-live');
+  if (brandLive) brandLive.classList.toggle('off', !on);
 }
 
 /* ------------------------------------------------------------------ SSE */
@@ -511,14 +572,26 @@ function connectSSE() {
   if (state.sse) { state.sse.close(); state.sse = null; }
   const es = new EventSource('/api/stream');
   state.sse = es;
-  es.onopen = () => setLive(true);
+  let reconnecting = false;
+  es.onopen = () => {
+    setLive(true);
+    if (reconnecting) {
+      reconnecting = false;
+      if (state.auth?.authenticated) {
+        if (LIVE_VIEWS.has(state.view)) refreshCurrent(true);
+        else warmSummary();
+      }
+    }
+  };
   es.onerror = () => {
+    reconnecting = true;
     setLive(false);
     if (state.sse === es && !state.auth?.authenticated) es.close();
     if (state.auth?.authenticated) {
       api('/api/auth/state').then((st) => { if (!st.authenticated) sessionExpired(); }).catch(() => {});
     }
   };
+  es.addEventListener('ready', () => setLive(true));
   es.onmessage = (event) => {
     let msg = null;
     try { msg = JSON.parse(event.data); } catch { return; }
@@ -527,7 +600,7 @@ function connectSSE() {
 }
 function agentSummaryHTML(agents) {
   const online = agents.filter(statusFromAgent).length;
-  return `<span><b>${num(agents.length)}</b> سرور ثبت شده</span><span class="badge-dot"><span class="dot"></span>${num(online)} آنلاین</span>${agents.length - online ? `<span class="badge-dot bad"><span class="dot"></span>${num(agents.length - online)} آفلاین</span>` : ''}`;
+  return `<span><b>${num(agents.length)}</b> سرور ثبت شده</span><span class="badge-dot ${online ? '' : 'bad'}"><span class="dot"></span>${num(online)} آنلاین</span>${agents.length - online ? `<span class="badge-dot bad"><span class="dot"></span>${num(agents.length - online)} آفلاین</span>` : ''}`;
 }
 
 function updateAgentSummary() {
@@ -577,6 +650,7 @@ function handleSSE(msg) {
       updateAgentCard(a);
       updateMiniAgent(a);
       updateAgentSummary();
+      if (state.modal?.kind === 'agent' && Number(state.modal?.agentId) === Number(a.id)) updateAgentDetailLive(a);
       return;
     }
   }
@@ -601,14 +675,11 @@ function handleSSE(msg) {
         state.summary.stats.agents_online = state.agents.filter(statusFromAgent).length;
       }
       const cardPatched = updateAgentCard(a);
-      const miniPatched = updateMiniAgent(a);
+      updateMiniAgent(a);
       updateAgentSummary();
+      if (state.modal?.kind === 'agent' && Number(state.modal?.agentId) === Number(a.id)) updateAgentDetailLive(a);
       if (state.view === 'servers') {
         if (!cardPatched) scheduleRefresh();
-        return;
-      }
-      if (state.view === 'dashboard') {
-        if (!miniPatched) scheduleRefresh();
         return;
       }
       return;
@@ -618,10 +689,11 @@ function handleSSE(msg) {
 }
 const LIVE_VIEWS = new Set(['dashboard', 'monitors', 'incidents', 'servers']);
 function scheduleRefresh() {
-  clearTimeout(state.refreshTimer);
+  if (!LIVE_VIEWS.has(state.view) || state.refreshTimer) return;
   state.refreshTimer = setTimeout(() => {
+    state.refreshTimer = null;
     if (!state.auth?.authenticated || !state.booted) return;
-    if (state.modal) { state.pendingRefresh = true; return; }
+    if (state.modal || state.confirm) { state.pendingRefresh = true; return; }
     if (!LIVE_VIEWS.has(state.view)) return;
     const active = document.activeElement;
     if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) { state.pendingRefresh = true; return; }
@@ -655,11 +727,14 @@ async function route() {
   state.view = view;
   state.routeId = id;
   state.pendingRefresh = false;
+  state.detailEpoch++;
   clearTimeout(state.refreshTimer);
+  state.refreshTimer = null;
+  closeConfirm();
   closeModal(true);
-  updateShell(view);
   closeUserMenu();
   closeSidebar();
+  updateShell(view);
   await loadView(view, id, false);
 }
 
@@ -675,15 +750,17 @@ function updateShell(view) {
 
 function updateBadges() {
   const s = state.summary?.stats;
+  const total = s?.total ?? (Array.isArray(state.monitors) && state.monitors.length ? state.monitors.length : null);
+  const active = s?.active_incidents ?? (Array.isArray(state.incidents) && state.incidents.length ? state.incidents.filter((i) => !i.ended_at).length : null);
   const monBadge = $('#nav-monitors-badge');
-  if (monBadge && s) {
-    const n = Number(s.total) || 0;
+  if (monBadge && total !== null) {
+    const n = Number(total) || 0;
     monBadge.textContent = num(n);
     monBadge.classList.toggle('show', n > 0);
   }
   const incBadge = $('#nav-incidents-badge');
-  if (incBadge && s) {
-    const n = Number(s.active_incidents) || 0;
+  if (incBadge && active !== null) {
+    const n = Number(active) || 0;
     incBadge.textContent = num(n);
     incBadge.classList.toggle('show', n > 0);
   }
@@ -708,11 +785,18 @@ function renderError(error) {
 }
 
 async function loadView(view, id, preserveScroll) {
+  const epoch = ++state.viewEpoch;
+  const stale = () => epoch !== state.viewEpoch;
   const scrollY = window.scrollY;
-  if (!preserveScroll) renderLoading();
+  if (!preserveScroll) {
+    renderLoading();
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
   try {
     if (view === 'dashboard') {
-      state.summary = await api('/api/summary');
+      const summary = await api('/api/summary');
+      if (stale()) return;
+      state.summary = summary;
       state.monitors = state.summary.monitors || [];
       state.agents = state.summary.agents || [];
       state.agentsOfflineAfter = state.summary.offline_after_sec || 120;
@@ -720,40 +804,50 @@ async function loadView(view, id, preserveScroll) {
       updateBadges();
     } else if (view === 'monitors') {
       const data = await api('/api/monitors');
+      if (stale()) return;
       state.monitors = data.monitors || [];
+      if (state.summary?.stats) state.summary.stats.total = state.monitors.length;
+      if (state.summary) state.summary.monitors = state.monitors;
       renderMonitors();
       updateBadges();
-      if (state.summary) {
-        state.summary.monitors = state.monitors;
-      }
       if (id) await openMonitorDetail(id, { fromRoute: true });
     } else if (view === 'incidents') {
       const data = await api('/api/incidents?limit=200');
+      if (stale()) return;
       state.incidents = data.incidents || [];
+      if (state.summary?.stats) state.summary.stats.active_incidents = state.incidents.filter((i) => !i.ended_at).length;
       renderIncidents();
+      updateBadges();
     } else if (view === 'servers') {
       const data = await api('/api/agents');
+      if (stale()) return;
       state.agents = data.agents || [];
       state.agentsOfflineAfter = data.offline_after_sec || 120;
       renderServers();
       if (id) await openAgentDetail(id, { fromRoute: true });
     } else if (view === 'rules') {
       const [rules, monitors] = await Promise.all([api('/api/rules'), api('/api/monitors')]);
+      if (stale()) return;
       state.rules = rules.rules || [];
       state.monitors = monitors.monitors || [];
       renderRules();
     } else if (view === 'cloudflare') {
       await loadCloudflareData();
+      if (stale()) return;
     } else if (view === 'notifications') {
       await loadNotificationsData();
+      if (stale()) return;
     } else if (view === 'settings') {
       const [settings, audit] = await Promise.all([api('/api/settings'), api('/api/audit?limit=8')]);
+      if (stale()) return;
       state.settingsData = settings;
       state.audit = audit.audit || [];
       renderSettings();
     }
+    if (stale()) return;
     afterRender();
   } catch (e) {
+    if (stale()) return;
     if (e?.status !== 401) renderError(e);
   }
   if (preserveScroll) window.scrollTo({ top: scrollY });
@@ -811,11 +905,11 @@ function monitorCard(m, options = {}) {
       <span class="mc-stat"><b>${m.last_latency_ms ? num(m.last_latency_ms) + 'ms' : '—'}</b></span>
       <span class="mc-stat">${timeAgo(m.last_checked_at)}</span>
       <span class="mc-actions">
-        <button class="icon-btn" style="width:27px;height:27px;border-radius:8px" type="button" title="بررسی فوری" data-action="check-monitor" data-id="${m.id}">${icon('refresh')}</button>
-        <button class="icon-btn" style="width:27px;height:27px;border-radius:8px" type="button" title="${m.enabled ? 'توقف' : 'فعال‌سازی'}" data-action="toggle-monitor" data-id="${m.id}">${icon(m.enabled ? 'pause' : 'play')}</button>
+        <button class="icon-btn" style="width:27px;height:27px;border-radius:8px" type="button" title="بررسی فوری" aria-label="بررسی فوری ${esc(m.name)}" data-action="check-monitor" data-id="${m.id}">${icon('refresh')}</button>
+        <button class="icon-btn" style="width:27px;height:27px;border-radius:8px" type="button" title="${m.enabled ? 'توقف' : 'فعال‌سازی'}" aria-label="${m.enabled ? 'توقف' : 'فعال‌سازی'} ${esc(m.name)}" data-action="toggle-monitor" data-id="${m.id}">${icon(m.enabled ? 'pause' : 'play')}</button>
       </span>
     </div>
-    ${active ? `<div style="font-size:9px;color:#fda4af;display:flex;gap:4px;align-items:center"><span style="width:4px;height:4px;border-radius:50%;background:#fb7185;display:inline-block"></span> رخداد باز از ${timeAgo(active.started_at)}</div>` : ''}
+    ${active ? `<div style="font-size:9px;color:var(--danger-text);display:flex;gap:4px;align-items:center"><span style="width:4px;height:4px;border-radius:50%;background:#fb7185;display:inline-block"></span> رخداد باز از ${timeAgo(active.started_at)}</div>` : ''}
   </article>`;
 }
 function incidentRow(inc, active, actions = false) {
@@ -833,7 +927,7 @@ function notificationRow(n) {
   const ok = n.ok;
   const channelIcon = n.channel === 'telegram' ? 'send' : n.channel === 'webpush' ? 'smartphone' : n.channel === 'webhook' ? 'webhook' : n.channel === 'cloudflare' ? 'cloud' : 'bell';
   return `<div class="notif-row">
-    <div class="notif-ico" style="${ok ? '' : 'background:rgba(251,113,133,.08);color:#fda4af'}">${icon(channelIcon)}</div>
+    <div class="notif-ico" style="${ok ? '' : 'background:rgba(251,113,133,.08);color:var(--danger-text)'}">${icon(channelIcon)}</div>
     <div class="notif-body"><div class="notif-title">${esc(n.title || n.rule_name || 'اعلان')}</div><div class="notif-meta">${esc(n.channel)} · ${ok ? 'ارسال شد' : esc(n.error || 'ناموفق')}</div></div>
     <div class="notif-time">${timeAgo(n.at)}</div>
   </div>`;
@@ -846,14 +940,41 @@ function bindGlobalEvents() {
   document.addEventListener('input', onDocumentInput);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if ($('.modal-backdrop[style*="z-index: 95"]')) {
-        $('.modal-backdrop[style*="z-index: 95"] [data-x="no"]')?.click();
-      } else if (state.modal) closeModal();
+      if (state.confirm) closeConfirm();
+      else if (state.modal) closeModal();
       closeUserMenu();
       closeSidebar();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      const card = e.target.closest?.('[role="button"][data-action]');
+      if (card && e.target === card) {
+        e.preventDefault();
+        card.click();
+        return;
+      }
+    }
+    if (e.key === 'Tab') {
+      const scope = state.confirm?.el || $('.modal-backdrop');
+      if (!scope) return;
+      const focusable = $$('button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])', scope)
+        .filter((el) => el.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !scope.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !scope.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   });
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', () => {
+    closeConfirm();
+    route();
+  });
   document.addEventListener('focusout', () => {
     setTimeout(() => {
       if (!state.pendingRefresh || state.modal || !LIVE_VIEWS.has(state.view)) return;
@@ -882,7 +1003,11 @@ function renderDashboard() {
   const agents = d.agents || [];
   const onlineAgents = agents.filter(statusFromAgent);
   const gaugePct = Number(stats.uptime_24h) || 0;
-  const hasDown = Number(stats.down) > 0;
+  const downCount = Number(stats.down) || 0;
+  const degradedCount = Number(stats.degraded) || 0;
+  const issueCount = downCount + degradedCount;
+  const hasDown = downCount > 0;
+  const hasIssues = issueCount > 0;
   const trend = (d.trend || []).filter((p) => p.total > 0);
   const latencyPoints = trend.filter((p) => p.avg_latency_ms > 0);
   const latencyAvg = latencyPoints.length ? latencyPoints.reduce((s, p) => s + p.avg_latency_ms, 0) / latencyPoints.length : 0;
@@ -895,39 +1020,44 @@ function renderDashboard() {
   const noData = monitors.length === 0;
 
   const heroTitle = hasDown
-    ? `${num(stats.down)} سرویس <span style="color:#fda4af">نیاز به توجه</span> دارد`
-    : noData
-      ? 'اولین قدم برای <span>آرامش خاطر</span>'
-      : 'همه‌چیز زیر <span>کنترل</span> است';
+    ? `${num(downCount)} سرویس <span style="color:var(--danger-text)">نیاز به توجه</span> دارد`
+    : degradedCount
+      ? `${num(degradedCount)} سرویس <span style="color:var(--warning-text)">هشدار</span> دارد`
+      : noData
+        ? 'اولین قدم برای <span>آرامش خاطر</span>'
+        : 'همه‌چیز زیر <span>کنترل</span> است';
   const heroDesc = hasDown
     ? 'یک یا چند سرویس از دسترس خارج شده‌اند. جزئیات را ببینید و در صورت نیاز، سوییچ خودکار DNS را فعال کنید.'
-    : noData
-      ? 'هنوز مانیتوری نساخته‌اید. یک دامنه، سرور یا کانفیگ اضافه کنید تا پالس از همین لحظه مراقبت را آغاز کند.'
-      : `پالس در ۲۴ ساعت گذشته ${num(stats.total)} سرویس و ${num(stats.agents_total || 0)} سرور را زیر نظر داشته است.`;
+    : degradedCount
+      ? 'عملکرد یک یا چند سرویس کند یا ناپایدار است. آخرین بررسی‌ها و جزئیات را ببینید.'
+      : noData
+        ? 'هنوز مانیتوری نساخته‌اید. یک دامنه، سرور یا کانفیگ اضافه کنید تا پالس از همین لحظه مراقبت را آغاز کند.'
+        : `پالس در ۲۴ ساعت گذشته ${num(stats.total)} سرویس و ${num(stats.agents_total || 0)} سرور را زیر نظر داشته است.`;
 
   $('#view').innerHTML = `
     <section class="panel overview-panel">
       <div class="overview-copy">
-        <span class="eyebrow" style="${hasDown ? 'color:#fda4af;border-color:rgba(251,113,133,.2);background:rgba(251,113,133,.06)' : ''}">${icon(hasDown ? 'alert' : 'activity')} ${hasDown ? 'نیازمند بررسی' : 'پایش لحظه‌ای'}</span>
+        <span class="eyebrow" style="${hasDown ? 'color:var(--danger-text);border-color:rgba(251,113,133,.2);background:rgba(251,113,133,.06)' : degradedCount ? 'color:var(--warning-text);border-color:rgba(251,146,60,.2);background:rgba(251,146,60,.06)' : ''}">${icon(hasIssues ? 'alert' : 'activity')} ${hasIssues ? 'نیازمند بررسی' : 'پایش لحظه‌ای'}</span>
         <h2>${heroTitle}</h2>
         <p>${heroDesc}</p>
         <div class="overview-tags">
           <span class="chip cyan">${icon('activity')} ${num(stats.total || 0)} مانیتور</span>
           <span class="chip green">${icon('check')} ${num(stats.up || 0)} سالم</span>
-          ${hasDown ? `<span class="chip red">${icon('alert')} ${num(stats.down || 0)} قطع</span>` : ''}
+          ${hasDown ? `<span class="chip red">${icon('alert')} ${num(downCount)} قطع</span>` : ''}
+          ${degradedCount ? `<span class="chip amber">${icon('alert')} ${num(degradedCount)} هشدار</span>` : ''}
           <span class="chip violet" data-dashboard-agent-chip>${icon('server')} ${num(onlineAgents.length)} سرور آنلاین</span>
         </div>
       </div>
       <div class="overview-gauge">
         <div class="gauge-big">
           <svg viewBox="0 0 176 176">
-            <defs><linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${hasDown ? '#fb7185' : '#38bdf8'}"/><stop offset="1" stop-color="${hasDown ? '#f97316' : '#8b5cf6'}"/></linearGradient></defs>
+            <defs><linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${hasDown ? '#fb7185' : hasIssues ? '#fb923c' : '#38bdf8'}"/><stop offset="1" stop-color="${hasDown ? '#f97316' : '#8b5cf6'}"/></linearGradient></defs>
             <circle class="track" cx="88" cy="88" r="74"/>
             <circle class="bar" cx="88" cy="88" r="74" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"/>
           </svg>
           <div class="gauge-center"><b>${trend.length || monitors.length ? num(gaugePct, 1) : '—'}<small>٪</small></b><span>آپتایم ۲۴ ساعته</span></div>
         </div>
-        <div class="gauge-caption"><span class="dot" style="background:${hasDown ? '#fb7185' : '#34d399'}"></span>${hasDown ? `${num(stats.active_incidents || 0)} رخداد باز` : 'همه سرویس‌ها پایدارند'}</div>
+        <div class="gauge-caption"><span class="dot" style="background:${hasDown ? '#fb7185' : hasIssues ? '#fb923c' : '#34d399'}"></span>${hasDown ? `${num(stats.active_incidents || 0)} رخداد باز` : degradedCount ? `${num(degradedCount)} سرویس در هشدار` : 'همه سرویس‌ها پایدارند'}</div>
       </div>
     </section>
 
@@ -939,7 +1069,7 @@ function renderDashboard() {
       </div>
       <div class="panel stat-card">
         <div class="stat-top"><span class="stat-label">قطعی / هشدار</span><span class="stat-ico red">${icon('alert')}</span></div>
-        <div class="stat-value" style="${hasDown ? 'color:#fda4af' : ''}">${num(stats.down || 0)}<small>سرویس</small></div>
+        <div class="stat-value" style="${hasIssues ? 'color:var(--danger-text)' : ''}">${num(issueCount)}<small>سرویس</small></div>
         <div class="stat-foot">${num(stats.active_incidents || 0)} رخداد در جریان · ${num(stats.paused || 0)} متوقف</div>
       </div>
       <div class="panel stat-card">
@@ -1026,9 +1156,7 @@ function renderDashboard() {
 function filteredMonitors() {
   const q = state.filters.search.trim().toLowerCase();
   return state.monitors.filter((m) => {
-    if (state.filters.status === 'up') {
-      if (m.status !== 'up' && m.status !== 'degraded') return false;
-    } else if (state.filters.status !== 'all' && m.status !== state.filters.status) return false;
+    if (state.filters.status !== 'all' && m.status !== state.filters.status) return false;
     if (!q) return true;
     return `${m.name} ${m.target} ${m.group}`.toLowerCase().includes(q);
   });
@@ -1048,13 +1176,19 @@ function refreshMonitorGrid() {
   if (!el) return;
   el.innerHTML = monitorGridHTML();
   $$('.spark', el).forEach(drawSpark);
-  const count = $('#monitor-count-text');
-  if (count) count.textContent = `${num(filteredMonitors().length)} از ${num(state.monitors.length)} مانیتور`;
+  const summary = $('[data-monitor-summary]');
+  if (summary) summary.innerHTML = monitorSummaryHTML();
   $$('[data-filter]').forEach((b) => b.classList.toggle('active', b.dataset.filter === state.filters.status));
 }
-function renderMonitors() {
+function monitorSummaryHTML() {
   const total = state.monitors.length;
-  const down = state.monitors.filter((m) => m.status === 'down').length;
+  const visible = filteredMonitors();
+  const filtered = visible.length;
+  const down = visible.filter((m) => m.status === 'down').length;
+  const degraded = visible.filter((m) => m.status === 'degraded').length;
+  return `<span id="monitor-count-text">${filtered === total ? `${num(total)} مانیتور` : `${num(filtered)} از ${num(total)} مانیتور`}</span>${down ? `<span class="badge-dot bad"><span class="dot"></span>${num(down)} قطع</span>` : ''}${degraded ? `<span class="badge-dot warn"><span class="dot"></span>${num(degraded)} هشدار</span>` : ''}${!down && !degraded && filtered ? '<span class="badge-dot"><span class="dot"></span>همه سالم</span>' : ''}`;
+}
+function renderMonitors() {
   $('#view').innerHTML = `
     <div class="page-toolbar">
       <div class="search-box">${icon('search')}<input id="monitor-search" placeholder="جستجوی نام، دامنه یا گروه…" value="${esc(state.filters.search)}" autocomplete="off"></div>
@@ -1062,23 +1196,27 @@ function renderMonitors() {
         ${[['all', 'همه'], ['up', 'سالم'], ['degraded', 'هشدار'], ['down', 'قطعی'], ['unknown', 'در انتظار'], ['paused', 'متوقف']].map(([key, label]) => `<button type="button" data-filter="${key}" class="${state.filters.status === key ? 'active' : ''}">${label}</button>`).join('')}
       </div>
       <div class="toolbar-spacer"></div>
-      <div class="page-summary"><span id="monitor-count-text">${num(total)} مانیتور</span>${down ? `<span class="badge-dot bad"><span class="dot"></span>${num(down)} قطع</span>` : '<span class="badge-dot"><span class="dot"></span>همه سالم</span>'}</div>
+      <div class="page-summary" data-monitor-summary>${monitorSummaryHTML()}</div>
       <button class="btn btn-primary" type="button" data-action="quick-monitor">${icon('plus')} مانیتور جدید</button>
     </div>
-    ${total ? `<div class="monitor-page-grid" id="monitors-page-grid">${monitorGridHTML()}</div>` : `<div class="monitor-page-grid" id="monitors-page-grid">${monitorGridHTML()}</div>`}`;
+    <div class="monitor-page-grid" id="monitors-page-grid">${monitorGridHTML()}</div>`;
 }
 
 /* ------------------------------------------------------------------ monitor detail */
 async function openMonitorDetail(id, opts = {}) {
+  const guard = ++state.detailEpoch;
   if (state.modal) closeModal(true);
   let data;
   try {
     data = await api(`/api/monitors/${id}`);
   } catch (e) {
-    toast(e.message, 'error');
-    if (opts.fromRoute) history.replaceState(null, '', '#/monitors');
+    if (guard === state.detailEpoch && state.view === 'monitors') {
+      toast(e.message, 'error');
+      if (parseHash().id === id) history.replaceState(null, '', '#/monitors');
+    }
     return;
   }
+  if (guard !== state.detailEpoch || state.view !== 'monitors') return;
   const m = data.monitor;
   const checks = data.checks || [];
   const daily = data.daily || [];
@@ -1133,16 +1271,16 @@ async function openMonitorDetail(id, opts = {}) {
       </div>
     </div>
     ${activeIncident ? `<div class="banner" style="margin-top:14px;border-color:rgba(251,113,133,.2);background:rgba(251,113,133,.055)">
-      <div class="banner-ico" style="background:rgba(251,113,133,.1);color:#fda4af">${icon('alert')}</div>
+      <div class="banner-ico" style="background:rgba(251,113,133,.1);color:var(--danger-text)">${icon('alert')}</div>
       <div class="banner-body"><b>رخداد در جریان از ${timeAgo(activeIncident.started_at)}</b><p>${esc(activeIncident.cause || m.last_error || 'در حال بررسی')} · مدت: ${duration(downSec)}</p></div>
     </div>` : ''}
     <div class="detail-stats">
-      <div class="mini-stat"><span>آپتایم ۲۴ ساعته</span><b style="color:${Number(m.uptime_24h) >= 99 ? '#6ee7b7' : '#fda4af'}">${m.uptime_24h ? uptimePct(m.uptime_24h) : '—'}</b></div>
+      <div class="mini-stat"><span>آپتایم ۲۴ ساعته</span><b style="color:${Number(m.uptime_24h) >= 99 ? 'var(--success-text)' : 'var(--danger-text)'}">${m.uptime_24h ? uptimePct(m.uptime_24h) : '—'}</b></div>
       <div class="mini-stat"><span>میانگین تأخیر</span><b>${m.avg_latency_ms ? num(m.avg_latency_ms) + ' ms' : '—'}</b></div>
       <div class="mini-stat"><span>آخرین بررسی</span><b style="font-size:11px">${m.last_checked_at ? timeAgo(m.last_checked_at) : 'هنوز'}</b></div>
-      <div class="mini-stat"><span>گواهی SSL</span><b style="font-size:11px;color:${sslDays !== null && sslDays <= 14 ? '#fcd34d' : 'var(--text-soft)'}">${sslDays === null ? '—' : sslDays < 0 ? 'منقضی' : num(sslDays) + ' روز'}</b></div>
+      <div class="mini-stat"><span>گواهی SSL</span><b style="font-size:11px;color:${sslDays !== null && sslDays <= 14 ? 'var(--warning-text)' : 'var(--text-soft)'}">${sslDays === null ? '—' : sslDays < 0 ? 'منقضی' : num(sslDays) + ' روز'}</b></div>
     </div>
-    ${m.last_error ? `<div class="warning-note" style="margin-top:12px;border-color:rgba(251,113,133,.16);background:rgba(251,113,133,.05);color:#fda4af">${icon('error')} <div><b style="display:block;font-size:10px;margin-bottom:2px">آخرین خطا</b>${esc(m.last_error)}</div></div>` : ''}
+    ${m.last_error ? `<div class="warning-note" style="margin-top:12px;border-color:rgba(251,113,133,.16);background:rgba(251,113,133,.05);color:var(--danger-text)">${icon('error')} <div><b style="display:block;font-size:10px;margin-bottom:2px">آخرین خطا</b>${esc(m.last_error)}</div></div>` : ''}
     ${last?.meta?.warn ? `<div class="warning-note" style="margin-top:12px">${icon('alert')} <div><b style="display:block;font-size:10px;margin-bottom:2px">هشدار آخرین بررسی</b>${esc(last.meta.warn)}</div></div>` : ''}
     <div class="detail-chart">
       <div class="detail-chart-head"><b>${icon('activity')} تأخیر پاسخ (${num(latency.length)} نمونه)</b><span>${dateTime(checks[checks.length - 1]?.at)} تا ${dateTime(last?.at)}</span></div>
@@ -1199,14 +1337,15 @@ async function openMonitorDetail(id, opts = {}) {
       if (location.hash.includes(`/monitors/${m.id}`)) history.replaceState(null, '', '#/monitors');
     },
   });
+  if (state.modal) Object.assign(state.modal, { kind: 'monitor', monitorId: Number(m.id) });
   setTimeout(() => {
-    if (!chartEmpty) {
-      lineChart($('#detailLatency'), {
-        series: [{ name: 'تأخیر', color: '#38bdf8', points: latency, fill: true }],
-        yFormat: (v) => num(v) + 'ms',
-        tipFormat: (v) => num(v) + ' ms',
-      });
-    }
+    const canvas = $('#detailLatency');
+    if (chartEmpty || !canvas || state.modal?.kind !== 'monitor' || Number(state.modal?.monitorId) !== Number(m.id)) return;
+    lineChart(canvas, {
+      series: [{ name: 'تأخیر', color: '#38bdf8', points: latency, fill: true }],
+      yFormat: (v) => num(v) + 'ms',
+      tipFormat: (v) => num(v) + ' ms',
+    });
   }, 40);
 }
 
@@ -1289,17 +1428,7 @@ function updateAgentCard(a) {
   const hostEl = card.querySelector('[data-agent-host]');
   if (hostEl) hostEl.textContent = `${a.hostname || '—'}${a.os ? ' · ' + a.os : ''}`;
   [['cpu', a.cpu_pct], ['ram', a.ram_pct], ['disk', a.disk_pct]].forEach(([key, raw]) => {
-    const unit = card.querySelector(`[data-agent-gauge="${key}"]`);
-    if (!unit) return;
-    const p = clamp(Number(raw) || 0, 0, 100);
-    const c = 2 * Math.PI * 30;
-    const val = unit.querySelector('circle.val');
-    if (val) {
-      val.setAttribute('stroke', gaugeColor(p));
-      val.setAttribute('stroke-dashoffset', (c - (p / 100) * c).toFixed(2));
-    }
-    const txt = unit.querySelector('.gauge > span');
-    if (txt) txt.textContent = `${num(p)}٪`;
+    updateGauge(card, key, raw);
   });
   const load = card.querySelector('[data-agent-load] b');
   if (load) load.textContent = nf1.format(a.load1 || 0);
@@ -1319,11 +1448,53 @@ function updateAgentCard(a) {
   }
   const version = card.querySelector('[data-agent-version]');
   if (version) version.textContent = `${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}`;
-  const gaugeEls = card.querySelectorAll('.gauge .val');
-  gaugeEls.forEach((el) => {
-    const dash = el.getAttribute('stroke-dasharray');
-    const final = el.getAttribute('stroke-dashoffset');
-    if (dash && final !== null) el.style.strokeDashoffset = final;
+  return true;
+}
+
+function updateGauge(root, key, raw) {
+  const unit = root.querySelector(`[data-agent-gauge="${key}"]`);
+  if (!unit) return;
+  const p = clamp(Number(raw) || 0, 0, 100);
+  const c = 2 * Math.PI * 30;
+  const val = unit.querySelector('circle.val');
+  if (val) {
+    val.setAttribute('stroke', gaugeColor(p));
+    val.setAttribute('stroke-dashoffset', (c - (p / 100) * c).toFixed(2));
+  }
+  const txt = unit.querySelector('.gauge > span');
+  if (txt) txt.textContent = `${num(p)}٪`;
+}
+
+function updateAgentDetailLive(a) {
+  const modal = $('.modal');
+  if (!modal) return false;
+  const q = agentQuality(a);
+  const online = modal.querySelector('[data-agent-detail-online]');
+  if (online) {
+    online.classList.toggle('off', !q.online);
+    online.innerHTML = `<span class="dot"></span>${q.online ? 'آنلاین' : 'آفلاین'}`;
+  }
+  const quality = modal.querySelector('[data-agent-detail-quality]');
+  if (quality) {
+    quality.className = `agent-quality ${q.cls}`;
+    quality.innerHTML = `${icon('signal')} ${q.online ? 'REST متصل' : 'قطع ارتباط'}`;
+  }
+  const seenInline = modal.querySelector('[data-agent-detail-seen-inline]');
+  if (seenInline) seenInline.textContent = `آخرین گزارش: ${timeAgo(a.last_seen)}`;
+  [['cpu', a.cpu_pct], ['ram', a.ram_pct], ['disk', a.disk_pct]].forEach(([key, raw]) => updateGauge(modal, key, raw));
+  const values = {
+    load: nf1.format(a.load1 || 0),
+    uptime: duration(a.uptime_sec || 0),
+    ram: a.ram_total ? bytes(a.ram_total) : '—',
+    disk: a.disk_total ? bytes(a.disk_total) : '—',
+    rx: `${bytes(a.net_rx_bps || 0)}/s`,
+    tx: `${bytes(a.net_tx_bps || 0)}/s`,
+    seen: timeAgo(a.last_seen),
+    version: a.version ? 'v' + fa(a.version) : '—',
+  };
+  Object.entries(values).forEach(([key, value]) => {
+    const el = modal.querySelector(`[data-agent-detail-${key}]`);
+    if (el) el.textContent = value;
   });
   return true;
 }
@@ -1342,7 +1513,7 @@ function renderServers() {
     </div>`}
     <div class="banner" style="margin-top:16px">
       <div class="banner-ico">${icon('signal')}</div>
-      <div class="banner-body"><b>اتصال REST پایدار</b><p>ایجنت با هندشیک اولیه، keep-alive و backoff خودکار به پنل وصل می‌شود. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:#9fdcff">pulse-agent update</code>.</p></div>
+      <div class="banner-body"><b>پروتکل اتصال ایجنت</b><p>ایجنت با هندشیک اولیه، keep-alive و backoff خودکار به پنل وصل می‌شود. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:var(--link-text)">pulse-agent update</code>.</p></div>
     </div>`;
 }
 
@@ -1357,7 +1528,7 @@ function renderRules() {
   $('#view').innerHTML = `
     <div class="banner">
       <div class="banner-ico">${icon('sliders')}</div>
-      <div class="banner-body"><b>موتور قوانین، قلب هوشمند پالس</b><p>هر قانون تعیین می‌کند چه رویدادی، چه زمانی و از طریق کدام کانال اطلاع داده شود. کانال‌ها را در صفحه <a href="#/notifications" style="color:#7dd3fc">اعلان‌ها</a> پیکربندی کنید.</p></div>
+      <div class="banner-body"><b>موتور قوانین، قلب هوشمند پالس</b><p>هر قانون تعیین می‌کند چه رویدادی، چه زمانی و از طریق کدام کانال اطلاع داده شود. کانال‌ها را در صفحه <a href="#/notifications" style="color:var(--link-text)">اعلان‌ها</a> پیکربندی کنید.</p></div>
       <button class="btn btn-primary btn-sm" type="button" data-action="new-rule">${icon('plus')} قانون جدید</button>
     </div>
     <div class="section-head"><div><h2><span class="dot-mark"></span> قوانین فعال</h2><p>${num(rules.filter((r) => r.enabled).length)} قانون فعال از ${num(rules.length)}</p></div><div class="head-actions"><span class="chip">${icon('clock')} زمان‌بندی هوشمند</span></div></div>
@@ -1367,8 +1538,8 @@ function renderRules() {
       return `<article class="panel rule-card ${r.enabled ? '' : 'disabled'}">
         <div class="rule-head">
           <div class="rule-ico ${t.tone}">${icon(t.icon)}</div>
-          <div class="rule-title"><b>${esc(r.name)}</b><span>${t.label} · ${esc(scope)}</span></div>
-          <label class="switch" title="${r.enabled ? 'غیرفعال کردن' : 'فعال کردن'}"><input type="checkbox" data-rule-toggle="${r.id}" ${r.enabled ? 'checked' : ''}><span></span></label>
+          <div class="rule-title"><b>${esc(cleanRuleName(r.name))}</b><span>${t.label} · ${esc(scope)}</span></div>
+          <label class="switch" title="${r.enabled ? 'غیرفعال کردن' : 'فعال کردن'}"><input type="checkbox" data-rule-toggle="${r.id}" aria-label="${r.enabled ? 'غیرفعال کردن' : 'فعال کردن'} ${esc(cleanRuleName(r.name))}" ${r.enabled ? 'checked' : ''}><span></span></label>
         </div>
         <div class="rule-desc">${t.desc}</div>
         <div class="rule-meta">
@@ -1377,7 +1548,7 @@ function renderRules() {
           <span class="chip">${icon('clock')} ${r.cooldown_sec ? 'هر ' + duration(r.cooldown_sec) : 'بدون محدودیت'}</span>
         </div>
         <div class="service-chips">${ruleChannelChips(r.channels)}</div>
-        <div class="rule-foot"><span class="tiny-label">${r.last_fired_at ? 'آخرین اجرا: ' + timeAgo(r.last_fired_at) : 'هنوز اجرا نشده'}</span><div class="rule-actions"><button class="btn btn-sm btn-ghost" type="button" data-action="edit-rule" data-id="${r.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-ghost" type="button" data-action="delete-rule" data-id="${r.id}" style="color:#fda4af">${icon('trash')}</button></div></div>
+        <div class="rule-foot"><span class="tiny-label">${r.last_fired_at ? 'آخرین اجرا: ' + timeAgo(r.last_fired_at) : 'هنوز اجرا نشده'}</span><div class="rule-actions"><button class="btn btn-sm btn-ghost" type="button" data-action="edit-rule" data-id="${r.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-ghost" type="button" data-action="delete-rule" data-id="${r.id}" style="color:var(--danger-text)" aria-label="حذف قانون ${esc(r.name)}">${icon('trash')}</button></div></div>
       </article>`;
     }).join('')}</div>` : `<div class="panel empty"><div class="empty-ico">${icon('sliders')}</div><h3>هنوز قانونی نساخته‌اید</h3><p>برای دریافت هشدار قطعی، انقضای SSL یا مصرف بالای منابع، یک قانون بسازید.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-rule">${icon('plus')} ساخت قانون</button></div>`}`;
 }
@@ -1416,19 +1587,24 @@ function afterRender() {
 
 /* ------------------------------------------------------------------ cloudflare */
 async function loadCloudflareData() {
+  const seq = ++state.cfZoneSeq;
   state.cfStatus = await api('/api/cloudflare/status');
   const monitors = await api('/api/monitors');
+  if (seq !== state.cfZoneSeq) return;
   state.cfMonitors = monitors.monitors || [];
   state.cfZones = [];
   state.cfRecords = [];
   state.cfError = '';
   if (state.cfStatus.connected) {
     try {
-      const zones = await api('/api/cloudflare/zones');
+      const zones = await api('/api/cloudflare/zones', { timeout: 35000 });
+      if (seq !== state.cfZoneSeq) return;
       state.cfZones = zones.zones || [];
       if (state.cfZones.length) {
         if (!state.cfZones.some((z) => z.id === state.cfZone)) state.cfZone = state.cfZones[0].id;
-        await fetchCFRecords(state.cfZone);
+        const records = await api(`/api/cloudflare/records?zone_id=${encodeURIComponent(state.cfZone)}`, { timeout: 35000 });
+        if (seq !== state.cfZoneSeq) return;
+        state.cfRecords = records.records || [];
       }
     } catch (e) {
       state.cfError = e.message;
@@ -1437,9 +1613,9 @@ async function loadCloudflareData() {
   renderCloudflare();
 }
 async function fetchCFRecords(zoneId) {
-  if (!zoneId) { state.cfRecords = []; return; }
-  const data = await api(`/api/cloudflare/records?zone_id=${encodeURIComponent(zoneId)}`);
-  state.cfRecords = data.records || [];
+  if (!zoneId) return [];
+  const data = await api(`/api/cloudflare/records?zone_id=${encodeURIComponent(zoneId)}`, { timeout: 35000 });
+  return data.records || [];
 }
 function cfRecordsFiltered() {
   const q = state.cfSearch.trim().toLowerCase();
@@ -1464,8 +1640,10 @@ function renderCloudflare() {
   const status = state.cfStatus || {};
   const configured = status.configured;
   const connected = status.connected;
+  const enabled = !!status.enabled;
   const zones = state.cfZones || [];
   const autoMonitors = state.cfMonitors.filter((m) => m.cf_enabled);
+  const stateLabel = connected && enabled ? 'متصل و فعال' : connected ? 'متصل · اتوماسیون خاموش' : configured ? 'اتصال ناموفق' : 'تنظیم نشده';
   const tokenForm = `
     <form data-form="cf-token">
       <div class="form-error"></div>
@@ -1479,12 +1657,13 @@ function renderCloudflare() {
   $('#view').innerHTML = `
     <section class="panel cf-hero">
       <div class="cf-logo">${icon('cloud')}</div>
-      <div class="cf-copy"><h2>${connected ? 'کلادفلر متصل است' : configured ? 'اتصال کلادفلر برقرار نیست' : 'سوییچ خودکار DNS'}</h2>
-        <p>${connected ? 'پالس می‌تواند رکوردهای A/AAAA را در زمان قطعی سرویس، به IP پشتیبان منتقل کند و پس از بازیابی برگرداند.' : 'با اتصال API، ترمیم خودکار DNS را فعال کنید تا قطعی‌ها بدون دخالت شما مدیریت شوند.'}</p>
+      <div class="cf-copy"><h2>${connected ? (enabled ? 'کلادفلر متصل است' : 'کلادفلر متصل است، اتوماسیون خاموش') : configured ? 'اتصال کلادفلر برقرار نیست' : 'سوییچ خودکار DNS'}</h2>
+        <p>${connected ? (enabled ? 'پالس می‌تواند رکوردهای A/AAAA را در زمان قطعی سرویس، به IP پشتیبان منتقل کند و پس از بازیابی برگرداند.' : 'اتصال توکن سالم است اما تغییر خودکار DNS غیرفعال شده است. از بخش مدیریت، دوباره فعال کنید.') : 'با اتصال API، ترمیم خودکار DNS را فعال کنید تا قطعی‌ها بدون دخالت شما مدیریت شوند.'}</p>
       </div>
-      <div class="cf-status">${connected ? `<span class="status-pill up"><span class="sdot"></span>متصل</span><span class="chip">${num(zones.length)} دامنه</span>` : configured ? `<span class="status-pill down"><span class="sdot"></span>اتصال ناموفق</span><button class="btn btn-sm" type="button" data-action="cf-refresh">${icon('refresh')} بررسی مجدد</button>` : `<span class="status-pill paused"><span class="sdot"></span>تنظیم نشده</span>`}</div>
+      <div class="cf-status">${connected ? `<span class="status-pill ${enabled ? 'up' : 'paused'}"><span class="sdot"></span>${stateLabel}</span><span class="chip">${num(zones.length)} دامنه</span>` : configured ? `<span class="status-pill down"><span class="sdot"></span>اتصال ناموفق</span><button class="btn btn-sm" type="button" data-action="cf-refresh">${icon('refresh')} بررسی مجدد</button>` : `<span class="status-pill paused"><span class="sdot"></span>تنظیم نشده</span>`}</div>
     </section>
     ${configured && !connected && status.error ? `<div class="warning-note">${icon('alert')} <div>${esc(status.error)}</div></div>` : ''}
+    ${state.cfError ? `<div class="warning-note">${icon('alert')} <div>${esc(state.cfError)}</div></div>` : ''}
     ${!configured || !connected ? `<div class="panel panel-pad" style="margin-top:16px"><div class="chart-title" style="margin-bottom:12px">${icon('key')} ${configured ? 'توکن را به‌روزرسانی کنید' : 'اتصال امن با API Token'}</div>${tokenForm}</div>` : ''}
     ${connected ? `
       <div class="cf-grid">
@@ -1500,7 +1679,7 @@ function renderCloudflare() {
         </div>
         <div class="cf-side">
           <div class="panel auto-switch-card">
-            <div class="chart-head" style="margin-bottom:0"><div><div class="chart-title">${icon('bolt')} سوییچ خودکار فعال</div><div class="chart-sub">مانیتورهایی با IP پشتیبان</div></div><span class="chip ${autoMonitors.length ? 'green' : ''}">${num(autoMonitors.length)}</span></div>
+            <div class="chart-head" style="margin-bottom:0"><div><div class="chart-title">${icon('bolt')} ${enabled ? 'سوییچ خودکار فعال' : 'سوییچ خودکار خاموش'}</div><div class="chart-sub">مانیتورهایی با IP پشتیبان</div></div><span class="chip ${enabled && autoMonitors.length ? 'green' : enabled ? '' : 'amber'}">${num(autoMonitors.length)}</span></div>
             <div class="auto-switch-list">
               ${autoMonitors.length ? autoMonitors.slice(0, 6).map((m) => `<div class="auto-switch-row"><span class="status-pill ${m.status}" style="height:22px;padding:0 7px"><span class="sdot"></span></span><div class="mini-info"><b>${esc(m.name)}</b><span>${esc(m.cf_record_name || m.target)} · ${esc(m.cf_primary || '—')} ← ${esc(m.cf_failover || '—')}</span>${m.cf_last_action ? `<span style="color:var(--faint);font-size:8px">${esc(m.cf_last_action)}</span>` : ''}</div><a class="btn btn-sm btn-ghost" href="#/monitors/${m.id}">${icon('chevron')}</a></div>`).join('') : `<div class="help" style="padding:10px 0">هنوز هیچ مانیتوری برای سوییچ خودکار پیکربندی نشده است. هنگام ویرایش مانیتور، بخش «سوییچ خودکار DNS» را فعال کنید.</div>`}
             </div>
@@ -1513,9 +1692,10 @@ function renderCloudflare() {
           </div>
         </div>
       </div>
-      <div class="panel panel-pad" style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chart-title">${icon('key')} مدیریت توکن</span><span class="help" style="flex:1">توکن فعلی ذخیره شده است. برای جایگزینی، توکن جدید را وارد کنید.</span><button class="btn btn-sm" type="button" data-action="cf-show-token-form">${icon('key')} تغییر توکن</button><button class="btn btn-sm btn-danger" type="button" data-action="cf-disable">${icon('pause')} غیرفعال‌سازی اتوماسیون</button></div>
+      <div class="panel panel-pad" style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chart-title">${icon('key')} مدیریت اتصال</span><span class="help" style="flex:1">${enabled ? 'اتوماسیون DNS فعال است.' : 'اتوماسیون DNS خاموش است؛ می‌توانید بدون تغییر توکن دوباره فعالش کنید.'}</span>${enabled ? `<button class="btn btn-sm btn-danger" type="button" data-action="cf-disable">${icon('pause')} غیرفعال‌سازی اتوماسیون</button>` : `<button class="btn btn-sm btn-primary" type="button" data-action="cf-enable">${icon('play')} فعال‌سازی اتوماسیون</button>`}<button class="btn btn-sm" type="button" data-action="cf-show-token-form">${icon('key')} تغییر توکن</button><button class="btn btn-sm btn-danger" type="button" data-action="cf-clear-token">${icon('trash')} حذف توکن</button></div>
       <div id="cf-token-slot" class="hidden"></div>
     ` : ''}`;
+  wireLabels($('#view'));
 }
 
 /* ------------------------------------------------------------------ notifications */
@@ -1538,6 +1718,44 @@ async function loadNotificationsData() {
   } catch { /* ignore */ }
   renderNotifications();
 }
+
+function captureNotificationDrafts() {
+  const drafts = {};
+  $$('#view form[data-form]').forEach((form) => {
+    const fields = {};
+    Array.from(form.elements).forEach((el) => {
+      if (!el.name) return;
+      fields[el.name] = { value: el.value, checked: !!el.checked };
+    });
+    drafts[form.dataset.form] = fields;
+  });
+  return drafts;
+}
+
+function restoreNotificationDrafts(drafts, except = '') {
+  Object.entries(drafts || {}).forEach(([formName, fields]) => {
+    if (formName === except) return;
+    const form = $(`#view form[data-form="${formName}"]`);
+    if (!form) return;
+    Object.entries(fields).forEach(([name, field]) => {
+      const el = form.elements.namedItem(name);
+      if (!el) return;
+      try { el.value = field.value; el.checked = field.checked; } catch { /* ignore */ }
+    });
+  });
+}
+
+async function refreshNotificationsPreserve(except = '') {
+  const drafts = captureNotificationDrafts();
+  await loadNotificationsData();
+  restoreNotificationDrafts(drafts, except);
+}
+
+async function reloadSettingsPreserve(except = '') {
+  const drafts = captureNotificationDrafts();
+  await loadView('settings', null, true);
+  restoreNotificationDrafts(drafts, except);
+}
 function renderNotifications() {
   const data = state.settingsData || {};
   const s = data.settings || {};
@@ -1550,24 +1768,24 @@ function renderNotifications() {
   const webhookConfigured = !!data.webhook_configured;
   const pushCount = push.subscriptions || 0;
   $('#view').innerHTML = `
-    <div class="banner"><div class="banner-ico">${icon('bell')}</div><div class="banner-body"><b>هوشمند خبردار شوید</b><p>اعلان‌ها بر اساس <a href="#/rules" style="color:#7dd3fc">قوانین</a> ارسال می‌شوند؛ قطعی‌ها، بازیابی، انقضای SSL، منابع بالا و اختلاف DNS. ساعات سکوت را هم می‌توانید تنظیم کنید.</p></div></div>
+    <div class="banner"><div class="banner-ico">${icon('bell')}</div><div class="banner-body"><b>هوشمند خبردار شوید</b><p>اعلان‌ها بر اساس <a href="#/rules" style="color:var(--link-text)">قوانین</a> ارسال می‌شوند؛ قطعی‌ها، بازیابی، انقضای SSL، منابع بالا و اختلاف DNS. ساعات سکوت را هم می‌توانید تنظیم کنید.</p></div></div>
     <div class="notif-grid">
       <form class="panel channel-card" data-form="telegram">
         <div class="channel-head"><div class="channel-ico tg">${icon('send')}</div><div class="channel-title"><b>تلگرام</b><span>پیام مستقیم از ربات</span></div><span class="channel-status ${telegramOn && telegramConfigured ? 'on' : ''}"></span></div>
         <div class="channel-body">
-          <div class="switch-row"><div class="switch-text"><b>ارسال به تلگرام</b><span>${telegramConfigured ? 'توکن ذخیره شده است' : 'توکن ربات را وارد کنید'}</span></div><label class="switch"><input type="checkbox" name="enabled" ${telegramOn ? 'checked' : ''}><span></span></label></div>
+          <div class="switch-row"><div class="switch-text"><b>ارسال به تلگرام</b><span>${telegramConfigured ? 'توکن ذخیره شده است' : 'توکن ربات را وارد کنید'}</span></div><label class="switch"><input type="checkbox" name="enabled" aria-label="فعال‌سازی ارسال به تلگرام" ${telegramOn ? 'checked' : ''}><span></span></label></div>
           <div class="field"><label>توکن ربات</label><input class="input ltr" type="password" name="token" autocomplete="off" placeholder="${telegramConfigured ? '•••••••• (برای تغییر وارد کنید)' : '123456789:AA...' }"></div>
           <div class="field"><label>Chat ID</label><input class="input ltr" type="text" name="chat_id" value="${esc(s.telegram_chat_id || '')}" placeholder="مثلاً 123456789 یا @channelname"></div>
           <div class="help">ربات را از <b>@BotFather</b> بسازید و برای گرفتن Chat ID، به ربات پیام دهید و از <b>@userinfobot</b> استفاده کنید. برای کانال، ربات را ادمین کنید.</div>
           <div class="form-error"></div>
         </div>
-        <div class="channel-foot"><button class="btn btn-sm btn-soft" type="submit">${icon('check')} ذخیره</button><div style="display:flex;gap:4px"><button class="btn btn-sm btn-ghost" type="button" data-action="telegram-test">${icon('send')} تست</button>${telegramConfigured ? `<button class="btn btn-sm btn-ghost" type="button" data-action="clear-telegram" style="color:#fda4af">${icon('trash')}</button>` : ''}</div></div>
+        <div class="channel-foot"><button class="btn btn-sm btn-soft" type="submit">${icon('check')} ذخیره</button><div style="display:flex;gap:4px"><button class="btn btn-sm btn-ghost" type="button" data-action="telegram-test">${icon('send')} تست</button>${telegramConfigured ? `<button class="btn btn-sm btn-ghost" type="button" data-action="clear-telegram" style="color:var(--danger-text)" aria-label="قطع اتصال تلگرام">${icon('trash')}</button>` : ''}</div></div>
       </form>
 
       <form class="panel channel-card" data-form="push-settings">
         <div class="channel-head"><div class="channel-ico push">${icon('smartphone')}</div><div class="channel-title"><b>Web Push</b><span>اعلان مرورگر و PWA</span></div><span class="channel-status ${s.webpush_enabled && state.pushSubscribed ? 'on' : ''}"></span></div>
         <div class="channel-body">
-          <div class="switch-row"><div class="switch-text"><b>اعلان مرورگر</b><span>${num(pushCount)} اشتراک ثبت شده</span></div><label class="switch"><input type="checkbox" name="enabled" ${s.webpush_enabled ? 'checked' : ''}><span></span></label></div>
+          <div class="switch-row"><div class="switch-text"><b>اعلان مرورگر</b><span>${num(pushCount)} اشتراک ثبت شده</span></div><label class="switch"><input type="checkbox" name="enabled" aria-label="فعال‌سازی اعلان مرورگر" ${s.webpush_enabled ? 'checked' : ''}><span></span></label></div>
           <div class="kv"><span>وضعیت این مرورگر</span><b>${state.pushSubscribed ? 'ثبت شده' : 'ثبت نشده'}</b></div>
           <div class="kv"><span>پشتیبانی</span><b>${'Notification' in window ? 'بله' : 'خیر'}</b></div>
           <div class="kv"><span>کلید عمومی VAPID</span><b class="ltr" style="font-size:8px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc((push.public_key || '').slice(0, 18))}…</b></div>
@@ -1585,15 +1803,15 @@ function renderNotifications() {
           <div class="help">در هر رویداد، یک JSON به آدرس شما POST می‌شود. هدر <b>X-Pulse-Signature</b> با HMAC-SHA256 امضا می‌شود.</div>
           <div class="form-error"></div>
         </div>
-        <div class="channel-foot"><button class="btn btn-sm btn-soft" type="submit">${icon('check')} ذخیره</button><div style="display:flex;gap:4px"><button class="btn btn-sm btn-ghost" type="button" data-action="webhook-test">${icon('send')} تست</button>${webhookConfigured ? `<button class="btn btn-sm btn-ghost" type="button" data-action="clear-webhook" style="color:#fda4af">${icon('trash')}</button>` : ''}</div></div>
+        <div class="channel-foot"><button class="btn btn-sm btn-soft" type="submit">${icon('check')} ذخیره</button><div style="display:flex;gap:4px"><button class="btn btn-sm btn-ghost" type="button" data-action="webhook-test">${icon('send')} تست</button>${webhookConfigured ? `<button class="btn btn-sm btn-ghost" type="button" data-action="clear-webhook" style="color:var(--danger-text)" aria-label="حذف وب‌هوک">${icon('trash')}</button>` : ''}</div></div>
       </form>
     </div>
 
     <form class="panel quiet-card" data-form="quiet-hours">
-      <div class="chart-head"><div><div class="chart-title">${icon('clock')} ساعات سکوت و تکرار هشدار</div><div class="chart-sub">اعلان‌های غیرحیاتی در این بازه ارسال نمی‌شوند.</div></div><label class="switch"><input type="checkbox" name="enabled" ${s.quiet_hours_enabled ? 'checked' : ''}><span></span></label></div>
+      <div class="chart-head"><div><div class="chart-title">${icon('clock')} ساعات سکوت و تکرار هشدار</div><div class="chart-sub">اعلان‌های غیرحیاتی در این بازه ارسال نمی‌شوند.</div></div><label class="switch"><input type="checkbox" name="enabled" aria-label="فعال‌سازی ساعات سکوت" ${s.quiet_hours_enabled ? 'checked' : ''}><span></span></label></div>
       <div class="quiet-grid">
-        <div class="field"><label>شروع سکوت</label><input class="input" type="time" name="start" value="${esc(s.quiet_start || '00:00')}"></div>
-        <div class="field"><label>پایان سکوت</label><input class="input" type="time" name="end" value="${esc(s.quiet_end || '07:00')}"></div>
+        <div class="field"><label>شروع سکوت</label><input class="input ltr" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" name="start" value="${esc(s.quiet_start || '00:00')}" placeholder="HH:MM"></div>
+        <div class="field"><label>پایان سکوت</label><input class="input ltr" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" name="end" value="${esc(s.quiet_end || '07:00')}" placeholder="HH:MM"></div>
         <div class="field"><label>تکرار هشدار قطعی (دقیقه)</label><input class="input" type="number" min="0" max="10080" name="repeat" value="${Number(s.notify_repeat_min) || 0}"><div class="help">۰ = بدون تکرار</div></div>
         <div class="field full"><label class="check-row"><input type="checkbox" name="critical" ${s.quiet_allow_critical ? 'checked' : ''}> هشدارهای حیاتی (قطعی) در ساعات سکوت هم ارسال شوند</label></div>
       </div>
@@ -1604,9 +1822,10 @@ function renderNotifications() {
     <div class="section-head"><div><h2><span class="dot-mark"></span> سابقه ارسال</h2><p>آخرین ${num(state.notifications.length)} اعلان ثبت‌شده</p></div><a class="btn btn-sm btn-ghost" href="#/rules">مدیریت قوانین ${icon('chevron')}</a></div>
     <div class="panel" style="padding:8px 14px">
       ${state.notifications.length ? `<div class="table-wrap"><table class="log-table"><thead><tr><th>وضعیت</th><th>عنوان</th><th>کانال</th><th>قانون</th><th>زمان</th></tr></thead><tbody>
-        ${state.notifications.map((n) => `<tr><td><span class="${n.ok ? 'ok-dot' : 'fail-dot'}" style="width:6px;height:6px;border-radius:50%;display:inline-block;margin-inline-end:5px;background:${n.ok ? '#34d399' : '#fb7185'}"></span>${n.ok ? 'موفق' : 'ناموفق'}</td><td class="log-title">${esc(n.title || '—')}${!n.ok && n.error ? `<div style="font-size:8.5px;color:#fda4af;margin-top:2px">${esc(n.error)}</div>` : ''}</td><td>${esc(n.channel)}</td><td>${esc(n.rule_name || '—')}</td><td style="white-space:nowrap">${timeAgo(n.at)}</td></tr>`).join('')}
+        ${state.notifications.map((n) => `<tr><td><span class="${n.ok ? 'ok-dot' : 'fail-dot'}" style="width:6px;height:6px;border-radius:50%;display:inline-block;margin-inline-end:5px;background:${n.ok ? '#34d399' : '#fb7185'}"></span>${n.ok ? 'موفق' : 'ناموفق'}</td><td class="log-title">${esc(n.title || '—')}${!n.ok && n.error ? `<div style="font-size:8.5px;color:var(--danger-text);margin-top:2px">${esc(n.error)}</div>` : ''}</td><td>${esc(n.channel)}</td><td>${esc(n.rule_name || '—')}</td><td style="white-space:nowrap">${timeAgo(n.at)}</td></tr>`).join('')}
       </tbody></table></div>` : `<div class="empty" style="padding:24px"><div class="empty-ico" style="width:46px;height:46px">${icon('bell')}</div><h3>هنوز اعلانی ارسال نشده</h3><p>با فعال‌سازی کانال‌ها و وقوع رویداد، سابقه اینجا نمایش داده می‌شود.</p></div>`}
     </div>`;
+  wireLabels($('#view'));
 }
 
 /* ------------------------------------------------------------------ settings */
@@ -1669,7 +1888,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.1')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.2')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -1686,7 +1905,7 @@ function renderSettings() {
         </div>
         <div class="panel settings-card">
           <h2>${icon('shield')} امنیت و سلامت</h2>
-          <div class="kv"><span>HTTPS</span><b>${requestSecure() ? 'فعال' : 'غیرفعال (HTTP)'}</b></div>
+          <div class="kv"><span>HTTPS</span><b>${requestSecure() ? 'فعال' : (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'لوکال (HTTP)' : 'غیرفعال (HTTP)')}</b></div>
           <div class="kv"><span>Web Push</span><b>${data.push_subscriptions ? num(data.push_subscriptions) + ' مشترک' : 'ثبت نشده'}</b></div>
           <div class="kv"><span>کلادفلر</span><b>${data.cloudflare_configured ? 'پیکربندی شده' : 'متصل نیست'}</b></div>
           <div class="kv"><span>تلگرام</span><b>${data.telegram_configured ? 'پیکربندی شده' : 'متصل نیست'}</b></div>
@@ -1695,7 +1914,7 @@ function renderSettings() {
       </div>
     </div>`;
 }
-function requestSecure() { return location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'; }
+function requestSecure() { return location.protocol === 'https:'; }
 
 /* ------------------------------------------------------------------ monitor form */
 function formVal(form, name) {
@@ -1795,7 +2014,7 @@ async function hydrateCFSelects(form, monitor) {
     if (!zones.length) {
       zoneSel.innerHTML = '<option value="">کلادفلر متصل نیست</option>';
       const note = form.querySelector('#m-cf-note');
-      if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:#7dd3fc">کلادفلر را متصل کنید</a>.`;
+      if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:var(--link-text)">کلادفلر را متصل کنید</a>.`;
       return;
     }
     zoneSel.innerHTML = '<option value="">انتخاب Zone…</option>' + zones.map((z) => `<option value="${esc(z.id)}" ${z.id === monitor?.cf_zone_id ? 'selected' : ''}>${esc(z.name)}</option>`).join('');
@@ -1805,7 +2024,7 @@ async function hydrateCFSelects(form, monitor) {
   } catch (e) {
     zoneSel.innerHTML = `<option value="">${esc('کلادفلر متصل نیست')}</option>`;
     const note = form.querySelector('#m-cf-note');
-    if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:#7dd3fc">کلادفلر را متصل کنید</a>.`;
+    if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:var(--link-text)">کلادفلر را متصل کنید</a>.`;
   }
 }
 async function openMonitorForm(monitor = null) {
@@ -1822,7 +2041,7 @@ async function openMonitorForm(monitor = null) {
     <div class="form-section" style="border-top:0;margin-top:0;padding-top:0">
       <div class="form-section-title">${icon('layers')} نوع بررسی</div>
       <div class="type-picker">
-        ${Object.entries(TYPES).map(([key, t]) => `<button type="button" class="type-option ${key === type ? 'selected' : ''}" data-action="select-monitor-type" data-type="${key}"><input type="radio" tabindex="-1" ${key === type ? 'checked' : ''}>${icon(t.icon)}<b>${t.label}</b><span>${key === 'http' ? 'کد وضعیت، کلیدواژه و SSL' : key === 'tcp' ? 'دسترسی پورت' : key === 'ping' ? 'پاسخ ICMP' : key === 'dns' ? 'مقدار رکورد' : key === 'ssl' ? 'انقضای گواهی' : 'VMess/VLESS/WireGuard'}</span></button>`).join('')}
+        ${Object.entries(TYPES).map(([key, t]) => `<button type="button" class="type-option ${key === type ? 'selected' : ''}" data-action="select-monitor-type" data-type="${key}" aria-pressed="${key === type}">${icon(t.icon)}<b>${t.label}</b><span>${key === 'http' ? 'کد وضعیت، کلیدواژه و SSL' : key === 'tcp' ? 'دسترسی پورت' : key === 'ping' ? 'پاسخ ICMP' : key === 'dns' ? 'مقدار رکورد' : key === 'ssl' ? 'انقضای گواهی' : 'VMess/VLESS/WireGuard'}</span></button>`).join('')}
       </div>
       <input type="hidden" name="type" id="m-type" value="${type}">
     </div>
@@ -1876,9 +2095,9 @@ async function refreshXrayHint() {
     const data = await api('/api/xray/status');
     const st = data.status || {};
     if (st.available) {
-      el.innerHTML = `<span style="color:#6ee7b7">Xray ${esc(st.version)} آماده است</span> — برای هر نود یک هستهٔ موقت اجرا و یک درخواست HTTP واقعی از داخل تونل ارسال می‌شود.`;
+      el.innerHTML = `<span style="color:var(--success-text)">Xray ${esc(st.version)} آماده است</span> — برای هر نود یک هستهٔ موقت اجرا و یک درخواست HTTP واقعی از داخل تونل ارسال می‌شود.`;
     } else {
-      el.innerHTML = `هستهٔ Xray شناسایی نشد: ${esc(st.error || 'باینری پیدا نشد')} — <a href="#/settings" style="color:#7dd3fc">نصب یا تنظیم مسیر</a>`;
+      el.innerHTML = `هستهٔ Xray شناسایی نشد: ${esc(st.error || 'باینری پیدا نشد')} — <a href="#/settings" style="color:var(--link-text)">نصب یا تنظیم مسیر</a>`;
     }
   } catch (e) {
     el.innerHTML = `وضعیت Xray در دسترس نیست: ${esc(e.message)}`;
@@ -1931,7 +2150,7 @@ function openRuleForm(rule = null) {
   const body = `<form id="rule-form" data-form="rule" data-id="${r?.id || ''}" novalidate>
     <div class="form-error"></div>
     <div class="form-grid">
-      <div class="field full"><label>نام قانون <span class="req">*</span></label><input class="input" name="name" value="${esc(r?.name || '')}" placeholder="مثلاً هشدار قطعی سایت اصلی" required></div>
+      <div class="field full"><label>نام قانون <span class="req">*</span></label><input class="input" name="name" value="${esc(cleanRuleName(r?.name || ''))}" placeholder="مثلاً هشدار قطعی سایت اصلی" required></div>
       <div class="field"><label>رویداد</label><select class="select" name="trigger" id="rule-trigger">${triggers.map(([k, t]) => `<option value="${k}" ${r?.trigger === k ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>
       <div class="field" id="rule-monitor-field"><label>محدوده</label><select class="select" name="monitor_id"><option value="0">همه مانیتورها</option>${state.monitors.map((m) => `<option value="${m.id}" ${r?.monitor_id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
       <div class="field" id="rule-threshold-field"><label id="rule-threshold-label">آستانه</label><input class="input" type="number" name="threshold" id="rule-threshold" min="0" value="${r?.threshold || ''}" placeholder="۱۴"><div class="help" id="rule-threshold-help">در صورت رسیدن به این مقدار، قانون اجرا می‌شود.</div></div>
@@ -2025,9 +2244,17 @@ function openAgentToken(data, title = 'ایجنت آماده نصب است') {
   });
 }
 async function openAgentDetail(id, opts = {}) {
+  const guard = ++state.detailEpoch;
   if (state.modal) closeModal(true);
   let data;
-  try { data = await api(`/api/agents/${id}/metrics?hours=${opts.hours || 24}`); } catch (e) { toast(e.message, 'error'); return; }
+  try { data = await api(`/api/agents/${id}/metrics?hours=${opts.hours || 24}`); } catch (e) {
+    if (guard === state.detailEpoch && state.view === 'servers') {
+      toast(e.message, 'error');
+      if (parseHash().id === id) history.replaceState(null, '', '#/servers');
+    }
+    return;
+  }
+  if (guard !== state.detailEpoch || state.view !== 'servers') return;
   const a = data.agent;
   const metrics = data.metrics || [];
   state.agentHours = opts.hours || 24;
@@ -2037,29 +2264,29 @@ async function openAgentDetail(id, opts = {}) {
   const peers = wg.reduce((s, w) => s + (w.peers?.length || 0), 0);
   const body = `<div class="detail-hero">
     <div class="agent-ico agent-ico-pulse" style="width:46px;height:46px">${icon('agent')}</div>
-    <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}"><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}${a.ip ? ' · ' + esc(a.ip) : ''}</div></div>
+    <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}" data-agent-detail-online><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}${a.ip ? ' · ' + esc(a.ip) : ''}</div></div>
     <div class="detail-actions"><button class="btn btn-sm" type="button" data-action="edit-agent" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-soft" type="button" data-action="rotate-agent" data-id="${a.id}">${icon('key')} توکن جدید</button></div>
   </div>
   <div class="agent-connection detail-connection">
-    <span class="agent-quality ${online ? 'great' : 'off'}">${icon('signal')} ${online ? 'REST متصل' : 'قطع ارتباط'}</span>
+    <span class="agent-quality ${online ? 'great' : 'off'}" data-agent-detail-quality>${icon('signal')} ${online ? 'REST متصل' : 'قطع ارتباط'}</span>
     <span class="chip cyan">JSON REST</span>
-    <span>آخرین گزارش: ${timeAgo(a.last_seen)}</span>
+    <span data-agent-detail-seen-inline>آخرین گزارش: ${timeAgo(a.last_seen)}</span>
     <span class="agent-update-hint">${icon('terminal')} <code>pulse-agent update</code></span>
   </div>
   <div class="gauges" style="padding:16px 0 8px">
-    ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU')}
-    ${gaugeRing(a.ram_pct || 0, gaugeColor(a.ram_pct || 0), 'RAM')}
-    ${gaugeRing(a.disk_pct || 0, gaugeColor(a.disk_pct || 0), 'دیسک')}
+    ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU', 'cpu')}
+    ${gaugeRing(a.ram_pct || 0, gaugeColor(a.ram_pct || 0), 'RAM', 'ram')}
+    ${gaugeRing(a.disk_pct || 0, gaugeColor(a.disk_pct || 0), 'دیسک', 'disk')}
   </div>
   <div class="detail-stats">
-    <div class="mini-stat"><span>Load 1m</span><b>${nf1.format(a.load1 || 0)}</b></div>
-    <div class="mini-stat"><span>آپتایم سرور</span><b style="font-size:11px">${duration(a.uptime_sec || 0)}</b></div>
-    <div class="mini-stat"><span>حافظه</span><b style="font-size:11px">${a.ram_total ? bytes(a.ram_total) : '—'}</b></div>
-    <div class="mini-stat"><span>دیسک</span><b style="font-size:11px">${a.disk_total ? bytes(a.disk_total) : '—'}</b></div>
-    <div class="mini-stat"><span>دریافت</span><b style="font-size:11px">${bytes(a.net_rx_bps || 0)}/s</b></div>
-    <div class="mini-stat"><span>ارسال</span><b style="font-size:11px">${bytes(a.net_tx_bps || 0)}/s</b></div>
-    <div class="mini-stat"><span>آخرین گزارش</span><b style="font-size:11px">${timeAgo(a.last_seen)}</b></div>
-    <div class="mini-stat"><span>نسخه ایجنت</span><b>${a.version ? 'v' + fa(a.version) : '—'}</b></div>
+    <div class="mini-stat"><span>Load 1m</span><b data-agent-detail-load>${nf1.format(a.load1 || 0)}</b></div>
+    <div class="mini-stat"><span>آپتایم سرور</span><b style="font-size:11px" data-agent-detail-uptime>${duration(a.uptime_sec || 0)}</b></div>
+    <div class="mini-stat"><span>حافظه</span><b style="font-size:11px" data-agent-detail-ram>${a.ram_total ? bytes(a.ram_total) : '—'}</b></div>
+    <div class="mini-stat"><span>دیسک</span><b style="font-size:11px" data-agent-detail-disk>${a.disk_total ? bytes(a.disk_total) : '—'}</b></div>
+    <div class="mini-stat"><span>دریافت</span><b style="font-size:11px" data-agent-detail-rx>${bytes(a.net_rx_bps || 0)}/s</b></div>
+    <div class="mini-stat"><span>ارسال</span><b style="font-size:11px" data-agent-detail-tx>${bytes(a.net_tx_bps || 0)}/s</b></div>
+    <div class="mini-stat"><span>آخرین گزارش</span><b style="font-size:11px" data-agent-detail-seen>${timeAgo(a.last_seen)}</b></div>
+    <div class="mini-stat"><span>نسخه ایجنت</span><b data-agent-detail-version>${a.version ? 'v' + fa(a.version) : '—'}</b></div>
   </div>
   <div class="detail-chart">
     <div class="detail-chart-head"><b>${icon('chart')} مصرف منابع</b><div class="range-tabs">${[6, 24, 72].map((h) => `<button type="button" data-action="agent-range" data-id="${id}" data-hours="${h}" class="${(opts.hours || 24) == h ? 'active' : ''}">${h === 24 ? '۲۴ ساعت' : h === 6 ? '۶ ساعت' : '۳ روز'}</button>`).join('')}</div></div>
@@ -2082,9 +2309,12 @@ async function openAgentDetail(id, opts = {}) {
     footer: `<div class="left"><button class="btn btn-danger btn-sm" type="button" data-action="delete-agent" data-id="${a.id}">${icon('trash')} حذف ایجنت</button></div><button class="btn btn-ghost btn-sm" type="button" data-action="close-detail" data-id="${a.id}">بستن</button>`,
     onClose: () => { if (location.hash.includes(`/servers/${a.id}`)) history.replaceState(null, '', '#/servers'); },
   });
+  if (state.modal) Object.assign(state.modal, { kind: 'agent', agentId: Number(a.id) });
   if (metrics.length >= 2) {
     setTimeout(() => {
-      lineChart($('#agentChart'), {
+      const canvas = $('#agentChart');
+      if (!canvas || state.modal?.kind !== 'agent' || Number(state.modal?.agentId) !== Number(a.id)) return;
+      lineChart(canvas, {
         series: [
           { name: 'CPU', color: '#38bdf8', points: metrics.map((m) => ({ x: m.at, y: m.cpu })), fill: true },
           { name: 'RAM', color: '#8b5cf6', points: metrics.map((m) => ({ x: m.at, y: m.ram })) },
@@ -2224,7 +2454,11 @@ async function onDocumentClick(e) {
         const type = actionEl.dataset.type;
         const cfg = {};
         form.querySelector('#m-type').value = type;
-        $$('.type-option', form).forEach((el) => el.classList.toggle('selected', el.dataset.type === type));
+        $$('.type-option', form).forEach((el) => {
+          const selected = el.dataset.type === type;
+          el.classList.toggle('selected', selected);
+          el.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
         form.querySelector('#type-fields').innerHTML = monitorTypeFields(type, cfg);
         const meta = targetMeta(type);
         form.querySelector('#m-target-label').innerHTML = `${meta.label} <span class="req">*</span>`;
@@ -2232,6 +2466,7 @@ async function onDocumentClick(e) {
         inp.placeholder = meta.placeholder;
         inp.classList.toggle('ltr', type !== 'proxy');
         form.querySelector('#m-target-hint').textContent = meta.hint;
+        wireLabels(form);
         if (type === 'proxy') {
           if (!form.dataset.id) {
             const timeout = form.elements.namedItem('timeout_ms');
@@ -2262,23 +2497,29 @@ async function onDocumentClick(e) {
       }
       case 'check-monitor': {
         const original = actionEl.innerHTML;
-        const inDetail = location.hash.includes('/monitors/');
+        const inDetail = state.modal?.kind === 'monitor' && Number(state.modal?.monitorId) === id;
+        const epochAtStart = state.viewEpoch;
         actionEl.disabled = true;
         actionEl.classList.add('is-busy');
         actionEl.innerHTML = `<span class="spin"></span> در حال تست…`;
         try {
-          const res = await api(`/api/monitors/${id}/check?wait=1`, { method: 'POST', body: {} });
+          const res = await api(`/api/monitors/${id}/check?wait=1`, { method: 'POST', body: {}, timeout: 120000 });
           const status = res.check?.status || res.monitor?.status;
           const labels = { up: 'سالم', degraded: 'هشدار', down: 'قطع', unknown: 'نامشخص' };
           toast(`بررسی انجام شد${status ? ' — ' + (labels[status] || status) : ''}`, status === 'down' ? 'error' : 'success');
-          if (inDetail) await openMonitorDetail(id);
-          else if (state.view === 'monitors') await loadView('monitors', null, true);
-          else await route();
+          if (inDetail) {
+            if (state.modal?.kind === 'monitor' && Number(state.modal?.monitorId) === id) await openMonitorDetail(id);
+          } else if (state.view === 'monitors' && epochAtStart === state.viewEpoch && !state.modal) {
+            await loadView('monitors', null, true);
+          }
         } catch (e) {
           toast(e.message || 'بررسی مانیتور ناموفق بود', 'error');
-          actionEl.disabled = false;
-          actionEl.classList.remove('is-busy');
-          actionEl.innerHTML = original;
+        } finally {
+          if (actionEl.isConnected) {
+            actionEl.disabled = false;
+            actionEl.classList.remove('is-busy');
+            actionEl.innerHTML = original;
+          }
         }
         break;
       }
@@ -2309,6 +2550,8 @@ async function onDocumentClick(e) {
         await api(`/api/incidents/${id}/resolve`, { method: 'POST', body: {} });
         toast('رخداد به‌صورت دستی بسته شد', 'success');
         await loadView('incidents', null, true);
+        if (state.summary?.stats) state.summary.stats.active_incidents = state.incidents.filter((i) => !i.ended_at).length;
+        updateBadges();
         break;
       }
       case 'clear-filters': state.filters = { status: 'all', search: '' }; renderMonitors(); afterRender(); break;
@@ -2323,6 +2566,7 @@ async function onDocumentClick(e) {
         if (!ok) break;
         const data = await api(`/api/agents/${id}/rotate`, { method: 'POST', body: {} });
         closeModal(true);
+        if (location.hash.includes('/servers/')) history.replaceState(null, '', '#/servers');
         openAgentToken(data, 'توکن جدید ساخته شد');
         break;
       }
@@ -2364,7 +2608,7 @@ async function onDocumentClick(e) {
         const result = await api('/api/xray/detect', { method: 'POST', body: {} });
         const st = result.status || {};
         toast(st.available ? `Xray ${st.version} شناسایی شد` : (st.error || 'هستهٔ Xray پیدا نشد'), st.available ? 'success' : 'error', 'هستهٔ Xray');
-        await loadView('settings', null, true);
+        await reloadSettingsPreserve();
         break;
       }
       case 'cf-disable': {
@@ -2372,6 +2616,12 @@ async function onDocumentClick(e) {
         if (!ok) break;
         await api('/api/settings', { method: 'PUT', body: { cloudflare_enabled: false } });
         toast('اتوماسیون DNS غیرفعال شد', 'success');
+        await loadCloudflareData();
+        break;
+      }
+      case 'cf-enable': {
+        await api('/api/settings', { method: 'PUT', body: { cloudflare_enabled: true } });
+        toast('اتوماسیون DNS فعال شد', 'success');
         await loadCloudflareData();
         break;
       }
@@ -2392,11 +2642,13 @@ async function onDocumentClick(e) {
       case 'telegram-test': {
         await api('/api/settings/test/telegram', { method: 'POST', body: {} });
         toast('پیام تست به تلگرام ارسال شد', 'success');
+        await refreshNotificationsPreserve();
         break;
       }
       case 'webhook-test': {
         await api('/api/settings/test/webhook', { method: 'POST', body: {} });
         toast('درخواست تست وب‌هوک ارسال شد', 'success');
+        await refreshNotificationsPreserve();
         break;
       }
       case 'clear-telegram': {
@@ -2404,7 +2656,7 @@ async function onDocumentClick(e) {
         if (!ok) break;
         await api('/api/settings', { method: 'PUT', body: { telegram_token_clear: true, telegram_enabled: false } });
         toast('اتصال تلگرام قطع شد', 'success');
-        await loadNotificationsData();
+        await refreshNotificationsPreserve('telegram');
         break;
       }
       case 'clear-webhook': {
@@ -2412,7 +2664,7 @@ async function onDocumentClick(e) {
         if (!ok) break;
         await api('/api/settings', { method: 'PUT', body: { webhook_url: '' } });
         toast('وب‌هوک حذف شد', 'success');
-        await loadNotificationsData();
+        await refreshNotificationsPreserve('webhook');
         break;
       }
       case 'push-enable': await enablePush(); break;
@@ -2420,6 +2672,7 @@ async function onDocumentClick(e) {
       case 'push-test': {
         const res = await api('/api/push/test', { method: 'POST', body: {} });
         toast(`پیام تست ارسال شد (${num(res.sent || 0)} موفق)`, 'success');
+        await refreshNotificationsPreserve();
         break;
       }
       case 'change-password': closeUserMenu(); openPasswordForm(); break;
@@ -2479,14 +2732,22 @@ async function onDocumentChange(e) {
     return;
   }
   if (el.id === 'cf-zone') {
+    const seq = ++state.cfZoneSeq;
     state.cfZone = el.value;
     state.cfRecordType = '';
+    state.cfRecords = [];
+    state.cfError = '';
+    const sc = window.scrollY;
     try {
-      await fetchCFRecords(el.value);
-      const sc = window.scrollY;
-      renderCloudflare();
-      window.scrollTo({ top: sc });
-    } catch (err) { toast(err.message, 'error'); }
+      const records = await fetchCFRecords(el.value);
+      if (seq !== state.cfZoneSeq) return;
+      state.cfRecords = records;
+    } catch (err) {
+      if (seq !== state.cfZoneSeq) return;
+      state.cfError = err.message;
+    }
+    renderCloudflare();
+    window.scrollTo({ top: sc });
     return;
   }
   if (el.id === 'cf-record-type') {
@@ -2580,7 +2841,8 @@ async function onDocumentSubmit(e) {
       await api(id ? `/api/rules/${id}` : '/api/rules', { method: id ? 'PUT' : 'POST', body });
       closeModal(true);
       toast(id ? 'قانون به‌روزرسانی شد' : 'قانون ساخته شد', 'success');
-      await loadView('rules', null, false);
+      if (state.view !== 'rules' || location.hash !== '#/rules') history.replaceState(null, '', '#/rules');
+      await route();
       return;
     }
     if (mode === 'agent') {
@@ -2588,7 +2850,8 @@ async function onDocumentSubmit(e) {
       closeModal(true);
       state.agents.push?.(data.agent);
       toast('ایجنت ساخته شد', 'success');
-      await loadView('servers', null, false);
+      history.replaceState(null, '', '#/servers');
+      await route();
       openAgentToken(data);
       return;
     }
@@ -2596,7 +2859,8 @@ async function onDocumentSubmit(e) {
       await api(`/api/agents/${form.dataset.id}`, { method: 'PUT', body: { name: formVal(form, 'name'), notes: formVal(form, 'notes') } });
       closeModal(true);
       toast('اطلاعات سرور ذخیره شد', 'success');
-      await loadView('servers', null, true);
+      if (location.hash.includes('/servers/')) history.replaceState(null, '', '#/servers');
+      await route();
       return;
     }
     if (mode === 'password') {
@@ -2638,13 +2902,13 @@ async function onDocumentSubmit(e) {
       if (token) body.telegram_token = token;
       await api('/api/settings', { method: 'PUT', body });
       toast('تنظیمات تلگرام ذخیره شد', 'success');
-      await loadNotificationsData();
+      await refreshNotificationsPreserve('telegram');
       return;
     }
     if (mode === 'push-settings') {
       await api('/api/settings', { method: 'PUT', body: { webpush_enabled: formChecked(form, 'enabled') } });
       toast('تنظیمات Web Push ذخیره شد', 'success');
-      await loadNotificationsData();
+      await refreshNotificationsPreserve('push-settings');
       return;
     }
     if (mode === 'webhook') {
@@ -2653,7 +2917,7 @@ async function onDocumentSubmit(e) {
       if (secret) body.webhook_secret = secret;
       await api('/api/settings', { method: 'PUT', body });
       toast('تنظیمات وب‌هوک ذخیره شد', 'success');
-      await loadNotificationsData();
+      await refreshNotificationsPreserve('webhook');
       return;
     }
     if (mode === 'quiet-hours') {
@@ -2668,7 +2932,7 @@ async function onDocumentSubmit(e) {
         },
       });
       toast('تنظیمات ساعات سکوت ذخیره شد', 'success');
-      await loadNotificationsData();
+      await refreshNotificationsPreserve('quiet-hours');
       return;
     }
     if (mode === 'settings-general') {
@@ -2685,8 +2949,11 @@ async function onDocumentSubmit(e) {
           agent_download_url: formVal(form, 'agent_download_url'),
         },
       });
+      const siteTitle = formVal(form, 'site_title');
+      if (siteTitle) state.auth = { ...(state.auth || {}), site_title: siteTitle };
       toast('تنظیمات سامانه ذخیره شد', 'success');
-      await loadView('settings', null, true);
+      await reloadSettingsPreserve('settings-general');
+      updateShell('settings');
       return;
     }
     if (mode === 'xray-settings') {
@@ -2700,7 +2967,7 @@ async function onDocumentSubmit(e) {
       const detected = await api('/api/xray/detect', { method: 'POST', body: {} });
       const st = detected.status || {};
       toast(st.available ? `Xray ${st.version} آماده است` : (st.error || 'Xray پیدا نشد'), st.available ? 'success' : 'error', 'هستهٔ Xray');
-      await loadView('settings', null, true);
+      await reloadSettingsPreserve('xray-settings');
       return;
     }
     throw new Error('فرم ناشناخته');
@@ -2738,7 +3005,7 @@ async function enablePush() {
   }
   await api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() });
   toast('اعلان مرورگر فعال شد', 'success');
-  await loadNotificationsData();
+  await refreshNotificationsPreserve();
 }
 async function disablePush() {
   if ('serviceWorker' in navigator) {
@@ -2750,7 +3017,7 @@ async function disablePush() {
     }
   }
   toast('اعلان این مرورگر غیرفعال شد', 'success');
-  await loadNotificationsData();
+  await refreshNotificationsPreserve();
 }
 async function downloadBackup() {
   const res = await fetch('/api/backup', { credentials: 'same-origin' });

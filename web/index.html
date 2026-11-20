@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="preload" href="/fonts/IRANSansWebFaNum.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/IRANSansWebFaNum_Bold.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/app.css?v=13">
+  <link rel="stylesheet" href="/assets/app.css?v=14">
 </head>
 <body>
   <div class="bg-fx" aria-hidden="true">
@@ -54,7 +54,7 @@
           </svg>
         </span>
         <span class="brand-text"><b>پالس</b><small>Pulse Monitor</small></span>
-        <span class="brand-live" title="پایش زنده"></span>
+        <span class="brand-live" id="brand-live" title="پایش زنده" aria-label="وضعیت اتصال زنده"></span>
       </a>
 
       <nav class="nav" aria-label="منوی اصلی">
@@ -156,6 +156,6 @@
   <div id="modal-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
 
-  <script type="module" src="/assets/app.js?v=13"></script>
+  <script type="module" src="/assets/app.js?v=14"></script>
 </body>
 </html>

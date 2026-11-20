@@ -1,11 +1,11 @@
 /* Pulse PWA service worker */
-const VERSION = 'pulse-v1.11.0';
+const VERSION = 'pulse-v1.4.2';
 const SHELL = [
   '/',
   '/index.html',
-  '/assets/app.css?v=13',
-  '/assets/app.js?v=13',
-  '/assets/charts.js?v=13',
+  '/assets/app.css?v=14',
+  '/assets/app.js?v=14',
+  '/assets/charts.js?v=14',
   '/fonts/IRANSansWebFaNum.woff2',
   '/fonts/IRANSansWebFaNum_Bold.woff2',
   '/fonts/IRANSansWebFaNum_Medium.woff2',
@@ -20,7 +20,11 @@ const SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(VERSION).then((cache) => cache.addAll(SHELL).catch(() => undefined)).then(() => self.skipWaiting())
+    caches.open(VERSION).then((cache) => {
+      // Cache entries individually so one optional asset cannot prevent the
+      // service worker from installing.
+      return Promise.all(SHELL.map((url) => cache.add(url).catch(() => undefined)));
+    }).then(() => self.skipWaiting())
   );
 });
 
@@ -40,10 +44,12 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).then((res) => {
-        const copy = res.clone();
-        caches.open(VERSION).then((cache) => cache.put('/index.html', copy)).catch(() => undefined);
+        if (res && res.ok) {
+          const copy = res.clone();
+          event.waitUntil(caches.open(VERSION).then((cache) => cache.put('/index.html', copy)).catch(() => undefined));
+        }
         return res;
-      }).catch(() => caches.match('/index.html').then((r) => r || caches.match('/')))
+      }).catch(() => caches.match('/index.html').then((r) => r || caches.match('/')).then((r) => r || Response.error()))
     );
     return;
   }
@@ -59,11 +65,13 @@ self.addEventListener('fetch', (event) => {
         const res = await fetch(request);
         if (res && res.status === 200) {
           const copy = res.clone();
-          caches.open(VERSION).then((cache) => cache.put(request, copy)).catch(() => undefined);
+          event.waitUntil(caches.open(VERSION).then((cache) => cache.put(request, copy)).catch(() => undefined));
         }
         return res;
       } catch {
-        return (await caches.match(request)) || (await caches.match('/index.html')) || Response.error();
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        return new Response('', { status: 504, statusText: 'Offline' });
       }
     })()
   );

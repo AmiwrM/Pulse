@@ -10,7 +10,7 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.4.1
+### خلاصهٔ نسخهٔ 1.4.2
 
 - ایجنت با **REST/JSON**، هندشیک اولیه، keep-alive و **backoff خودکار**؛ گزارش هر **۱ ثانیه** و به‌روزرسانی UI با SSE.
 - نصب ایجنت با **یک دستور** از داخل پنل؛ توکن در `/etc/pulse/agent.env`.
@@ -114,8 +114,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.4.1
-git push origin v1.4.1
+git tag v1.4.2
+git push origin v1.4.2
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -128,7 +128,7 @@ git push origin v1.4.1
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.4.1 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.4.2 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -151,7 +151,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 
 ## دستورهای مدیریت VPS
 
-بعد از نصب نسخهٔ `1.4.1` به بعد، هم پنل و هم ایجنت دستورهای مدیریتی دارند:
+بعد از نصب نسخهٔ `1.4.2` به بعد، هم پنل و هم ایجنت دستورهای مدیریتی دارند:
 
 ```bash
 # پنل اصلی
@@ -170,8 +170,8 @@ pulse-agent update
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.4.1
-pulse-agent update --release v1.4.1
+pulse update --release v1.4.2
+pulse-agent update --release v1.4.2
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -442,7 +442,7 @@ server {
 
 ## ایجنت سرور
 
-برای دیدن CPU/RAM/Disk، وضعیت سرویس‌ها و WireGuard، ایجنت را روی هر VPS نصب کنید. ایجنت همان باینری پالس است و در حالت `--agent` اجرا می‌شود. ارتباط ایجنت از نسخهٔ `1.4.1` یک REST/JSON با هندشیک اولیه، keep-alive و backoff خودکار است؛ اگر پنل لحظه‌ای در دسترس نباشد، ایجنت به‌جای قطع ماندن، خودش دوباره وصل می‌شود.
+برای دیدن CPU/RAM/Disk، وضعیت سرویس‌ها و WireGuard، ایجنت را روی هر VPS نصب کنید. ایجنت همان باینری پالس است و در حالت `--agent` اجرا می‌شود. ارتباط ایجنت از نسخهٔ `1.4.2` یک REST/JSON با هندشیک اولیه، keep-alive و backoff خودکار است؛ اگر پنل لحظه‌ای در دسترس نباشد، ایجنت به‌جای قطع ماندن، خودش دوباره وصل می‌شود.
 
 ### ۱. ساخت توکن
 
@@ -673,7 +673,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.4.1` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.4.2` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -712,8 +712,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.4.1
-git push origin v1.4.1
+git tag v1.4.2
+git push origin v1.4.2
 ```
 
 ---

@@ -25,13 +25,15 @@ func (a *App) handleSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	up, down, paused, unknown := 0, 0, 0, 0
+	up, degraded, down, paused, unknown := 0, 0, 0, 0, 0
 	uptimeSum := 0.0
 	uptimeCount := 0
 	for _, m := range monitors {
 		switch m.Status {
-		case "up", "degraded":
+		case "up":
 			up++
+		case "degraded":
+			degraded++
 		case "down":
 			down++
 		case "paused":
@@ -56,6 +58,8 @@ func (a *App) handleSummary(w http.ResponseWriter, r *http.Request) {
 	overall := "healthy"
 	if down > 0 {
 		overall = "down"
+	} else if degraded > 0 {
+		overall = "degraded"
 	} else if unknown > 0 || uptimeCount == 0 {
 		overall = "unknown"
 	}
@@ -66,6 +70,7 @@ func (a *App) handleSummary(w http.ResponseWriter, r *http.Request) {
 		"stats": map[string]any{
 			"total":            len(monitors),
 			"up":               up,
+			"degraded":         degraded,
 			"down":             down,
 			"paused":           paused,
 			"unknown":          unknown,
