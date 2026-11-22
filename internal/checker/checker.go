@@ -186,7 +186,7 @@ func Validate(monType, target string, raw json.RawMessage) error {
 			}
 		}
 		if c.MaxRealNodes < 0 || c.MaxRealNodes > 30 {
-			return fmt.Errorf("تعداد نودهای تست واقعی باید بین ۱ تا ۳۰ باشد")
+			return fmt.Errorf("تعداد کانفیگ‌های تست واقعی باید بین ۱ تا ۳۰ باشد")
 		}
 	default:
 		return fmt.Errorf("نوع مانیتور ناشناخته است")

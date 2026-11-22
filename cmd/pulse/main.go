@@ -15,7 +15,7 @@ import (
 	"pulse/internal/app"
 )
 
-var version = "1.4.3"
+var version = "1.4.4"
 
 func main() {
 	if handleManagementCLI(os.Args[1:]) {

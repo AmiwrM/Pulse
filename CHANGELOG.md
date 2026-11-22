@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.4.4
+
+- Header is now full-bleed: page gutters moved from the main column to the
+  header/view/footer, so no empty strips remain between the header, sidebar
+  and viewport edges on any page.
+- The dashboard gauge glow no longer has a rectangular edge. The drop shadow
+  moved from the clipped SVG shape to the SVG element, and the ambient halo
+  is a wide radial gradient that reaches transparent before its box ends.
+- Replaced the generic "node" wording with context-appropriate terms:
+  proxy **configs** in the UI, API messages and README.
+- Slightly enlarged small icons across navigation, buttons, chips, stat cards
+  and detail panels for better legibility.
+- Fixed the 24-hour trend panel growing without bound: the canvas wrapper now
+  has a definite height, breaking the ResizeObserver/canvas feedback loop.
+- The dashboard server-health panel now refreshes when an agent comes online
+  or a new agent is added while the dashboard is open, so it no longer
+  disagrees with the "servers online" summary chip.
+- Version bump so `pulse update` picks up the release.
+
 ## 1.4.3
 
 - Fixed the root cause of transparent-looking modals: `#modal-root` was

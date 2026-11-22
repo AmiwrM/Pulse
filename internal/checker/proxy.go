@@ -87,7 +87,7 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 
 	meta["total"] = len(nodes)
 	if len(nodes) == 0 {
-		return Result{Error: "هیچ نود قابل‌پشتیبانی در کانفیگ پیدا نشد (vmess/vless/trojan/ss/wireguard)", Meta: meta}
+		return Result{Error: "هیچ کانفیگ قابل‌پشتیبانی پیدا نشد (vmess/vless/trojan/ss/wireguard)", Meta: meta}
 	}
 
 	// Fast transport-level probe first. It removes dead endpoints before we pay
@@ -115,7 +115,7 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 			if nodes[i].XrayNode == nil {
 				nodes[i].RealSkipped = true
 				if nodes[i].RealNote == "" {
-					nodes[i].RealNote = "تست واقعی Xray برای این نوع نود در دسترس نیست"
+					nodes[i].RealNote = "تست واقعی Xray برای این نوع کانفیگ در دسترس نیست"
 				}
 			}
 		}
@@ -166,7 +166,7 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 				}
 				meta["test_url"] = testURL
 				if len(candidates) == 0 {
-					meta["real_test_skipped"] = "هیچ نودی برای تست واقعی Xray وجود ندارد"
+					meta["real_test_skipped"] = "هیچ کانفیگی برای تست واقعی Xray وجود ندارد"
 				} else {
 					selected := candidates
 					if len(selected) > maxReal {
@@ -175,7 +175,7 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 							nodes[idx].RealSkipped = true
 							nodes[idx].RealNote = "محدودیت تعداد تست واقعی Xray"
 						}
-						warnings = append(warnings, fmt.Sprintf("تست واقعی فقط برای %d نود انجام شد", maxReal))
+						warnings = append(warnings, fmt.Sprintf("تست واقعی فقط برای %d کانفیگ انجام شد", maxReal))
 					}
 					specs := make([]xray.Node, 0, len(selected))
 					for _, idx := range selected {
@@ -211,10 +211,10 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 						meta["real_tested"] = realDone
 						meta["real_passed"] = realOK
 						if infraErrors > 0 {
-							warnings = append(warnings, fmt.Sprintf("تست واقعی برای %d نود اجرا نشد (خطای موتور Xray)", infraErrors))
+							warnings = append(warnings, fmt.Sprintf("تست واقعی برای %d کانفیگ اجرا نشد (خطای موتور Xray)", infraErrors))
 						}
 						if realDone > 0 && realOK < realDone {
-							warnings = append(warnings, fmt.Sprintf("%d نود هندشیک واقعی را رد نکردند", realDone-realOK))
+							warnings = append(warnings, fmt.Sprintf("%d کانفیگ هندشیک واقعی را رد نکردند", realDone-realOK))
 						}
 					}
 				}
@@ -238,9 +238,9 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 
 	res := Result{OK: healthy >= minHealthy, LatencyMS: minLatency, Meta: meta}
 	if !res.OK {
-		res.Error = fmt.Sprintf("تنها %d از %d نود در دسترس است (حداقل %d لازم است)", healthy, len(nodes), minHealthy)
+		res.Error = fmt.Sprintf("تنها %d از %d کانفیگ در دسترس است (حداقل %d لازم است)", healthy, len(nodes), minHealthy)
 	} else if healthy < len(nodes) {
-		warnings = append(warnings, fmt.Sprintf("%d از %d نود در دسترس نیست", len(nodes)-healthy, len(nodes)))
+		warnings = append(warnings, fmt.Sprintf("%d از %d کانفیگ در دسترس نیست", len(nodes)-healthy, len(nodes)))
 	}
 	if len(warnings) > 0 {
 		res.Warn = strings.Join(warnings, "؛ ")

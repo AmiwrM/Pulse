@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=15';
+import { lineChart, sparkline } from './charts.js?v=16';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -460,7 +460,7 @@ function renderAuth(mode, message = '') {
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.3')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.4')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -614,6 +614,13 @@ function updateAgentSummary() {
   if (foot) foot.textContent = agents.length ? (online === agents.length ? 'همه ایجنت‌ها متصل' : 'برخی ایجنت‌ها قطع هستند') : 'هنوز ایجنتی اضافه نشده';
   const chip = document.querySelector('[data-dashboard-agent-chip]');
   if (chip) chip.innerHTML = `${icon('server')} ${num(online)} سرور آنلاین`;
+  // If the dashboard was rendered while no agent existed, the server-health
+  // panel still shows its empty state. Refresh it once agents appear (or
+  // disappear) so the panel and the summary chip never disagree.
+  if (state.view === 'dashboard' && document.querySelector('.mini-agent-list')
+    && Math.min(agents.length, 5) !== document.querySelectorAll('[data-mini-agent]').length) {
+    scheduleRefresh();
+  }
 }
 
 function updateMiniAgent(a) {
@@ -1299,10 +1306,10 @@ async function openMonitorDetail(id, opts = {}) {
       <div class="uptime-legend"><span>${bars[0] ? dateShort(bars[0].dt.getTime() / 1000) : '—'}</span><span>امروز</span></div>
     </div>
     ${nodes.length ? `<div class="detail-chart">
-      <div class="detail-chart-head"><b>${icon('layers')} نودهای کانفیگ</b><span>${num(nodeHealthy)} از ${num(meta.total || nodes.length)} نود سالم${meta.xray_version ? ` · Xray ${esc(meta.xray_version)}` : ''}</span></div>
+      <div class="detail-chart-head"><b>${icon('layers')} کانفیگ‌های پروکسی</b><span>${num(nodeHealthy)} از ${num(meta.total || nodes.length)} کانفیگ سالم${meta.xray_version ? ` · Xray ${esc(meta.xray_version)}` : ''}</span></div>
       ${meta.real_test_requested ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center"><span class="chip ${meta.real_tested > 0 ? 'green' : 'amber'}">${icon('bolt')} هندشیک واقعی: ${num(meta.real_tested || 0)} تست، ${num(meta.real_passed || 0)} موفق</span>${meta.test_url ? `<span class="chip" title="${esc(meta.test_url)}">تست: ${esc(meta.test_url)}</span>` : ''}</div>` : ''}
-      <div class="node-health"><div class="node-health-bar"><span style="width:${nodeHealthPct}%"></span></div><span>${nf1.format(nodeHealthPct)}٪ کیفیت نودها</span></div>
-      <div class="table-wrap"><table class="node-table"><thead><tr><th>نود</th><th>پروتکل</th><th>آدرس</th><th>روش</th><th>تأخیر</th><th>وضعیت</th></tr></thead><tbody>
+      <div class="node-health"><div class="node-health-bar"><span style="width:${nodeHealthPct}%"></span></div><span>${nf1.format(nodeHealthPct)}٪ سلامت کانفیگ‌ها</span></div>
+      <div class="table-wrap"><table class="node-table"><thead><tr><th>کانفیگ</th><th>پروتکل</th><th>آدرس</th><th>روش</th><th>تأخیر</th><th>وضعیت</th></tr></thead><tbody>
         ${nodes.map((n) => {
           const method = n.real_tested ? 'Xray' : n.method === 'tls' ? 'TLS' : n.method === 'udp' ? 'UDP' : 'TCP';
           const methodClass = n.real_tested ? 'violet' : n.real_skipped ? 'amber' : 'cyan';
@@ -1888,7 +1895,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.3')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.4')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -1952,12 +1959,12 @@ function monitorTypeFields(type, cfg = {}) {
       <div class="field full"><div class="help">اگر آدرس شامل پورت نیست، پورت ۴۴۳ استفاده می‌شود. اعتبار گواهی، نام صادرکننده و تاریخ انقضا ذخیره می‌شود.</div></div>`;
   }
   if (type === 'proxy') {
-    return `<div class="field full"><label>کانفیگ یا لینک ساب‌سکریپشن <span class="req">*</span></label><textarea class="textarea ltr" name="input" rows="5" placeholder="vmess://...&#10;vless://...&#10;https://example.com/subscription&#10;یا متن کامل WireGuard / Clash">${esc(val('input'))}</textarea><div class="help">پشتیبانی از vmess، vless، trojan، shadowsocks، hysteria2/tuic، کانفیگ WireGuard و ساب‌سکریپشن Base64. برای کانفیگ گروهی، تعداد نودهای سالم بررسی می‌شود.</div></div>
-      <div class="field"><label>حداقل نود سالم</label><input class="input" type="number" min="1" name="min_healthy" value="${Number(val('min_healthy', 1)) || 1}"></div>
+    return `<div class="field full"><label>کانفیگ یا لینک ساب‌سکریپشن <span class="req">*</span></label><textarea class="textarea ltr" name="input" rows="5" placeholder="vmess://...&#10;vless://...&#10;https://example.com/subscription&#10;یا متن کامل WireGuard / Clash">${esc(val('input'))}</textarea><div class="help">پشتیبانی از vmess، vless، trojan، shadowsocks، hysteria2/tuic، کانفیگ WireGuard و ساب‌سکریپشن Base64. برای کانفیگ گروهی، تعداد کانفیگ‌های سالم بررسی می‌شود.</div></div>
+      <div class="field"><label>حداقل کانفیگ سالم</label><input class="input" type="number" min="1" name="min_healthy" value="${Number(val('min_healthy', 1)) || 1}"></div>
       <div class="field"><label class="check-row" style="margin-top:25px"><input type="checkbox" name="skip_tls_verify" ${checked('skip_tls_verify') ? 'checked' : ''}> نادیده گرفتن گواهی در دریافت ساب</label></div>
       <div class="field full"><label class="check-row"><input type="checkbox" name="real_test" ${cfg.real_test === false ? '' : 'checked'}> هندشیک واقعی با هستهٔ Xray <span class="chip violet" style="height:18px;padding:0 6px">Real test</span></label><div class="help" id="xray-hint">در حال بررسی هستهٔ Xray…</div></div>
       <div class="field full"><label>آدرس تست اتصال (HTTP/HTTPS)</label><input class="input ltr" name="test_url" value="${esc(val('test_url'))}" placeholder="https://www.gstatic.com/generate_204"><div class="help">درخواست از داخل تونل به این آدرس زده می‌شود. باید از سمت سرور پروکسی قابل دسترس باشد و کد 2xx/3xx برگرداند.</div></div>
-      <div class="field"><label>حداکثر نود برای تست واقعی</label><input class="input" type="number" min="1" max="30" name="max_real_nodes" value="${Number(val('max_real_nodes', 10)) || 10}"><div class="help">برای سابسکریپشن‌های بزرگ، فقط این تعداد نود با Xray هندشیک واقعی می‌شوند.</div></div>
+      <div class="field"><label>حداکثر کانفیگ برای تست واقعی</label><input class="input" type="number" min="1" max="30" name="max_real_nodes" value="${Number(val('max_real_nodes', 10)) || 10}"><div class="help">برای سابسکریپشن‌های بزرگ، فقط این تعداد کانفیگ با Xray هندشیک واقعی می‌شوند.</div></div>
       <div class="field full"><div class="service-chips"><span class="chip violet">VMess</span><span class="chip violet">VLESS</span><span class="chip violet">Trojan</span><span class="chip violet">Shadowsocks</span><span class="chip violet">WireGuard</span><span class="chip amber">Hysteria2/TUIC: فقط دسترسی</span></div></div>`;
   }
   if (type === 'tcp') {
@@ -2095,7 +2102,7 @@ async function refreshXrayHint() {
     const data = await api('/api/xray/status');
     const st = data.status || {};
     if (st.available) {
-      el.innerHTML = `<span style="color:var(--success-text)">Xray ${esc(st.version)} آماده است</span> — برای هر نود یک هستهٔ موقت اجرا و یک درخواست HTTP واقعی از داخل تونل ارسال می‌شود.`;
+      el.innerHTML = `<span style="color:var(--success-text)">Xray ${esc(st.version)} آماده است</span> — برای هر کانفیگ یک هستهٔ موقت اجرا و یک درخواست HTTP واقعی از داخل تونل ارسال می‌شود.`;
     } else {
       el.innerHTML = `هستهٔ Xray شناسایی نشد: ${esc(st.error || 'باینری پیدا نشد')} — <a href="#/settings" style="color:var(--link-text)">نصب یا تنظیم مسیر</a>`;
     }

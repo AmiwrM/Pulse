@@ -19,7 +19,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.4.3"
+INSTALLER_VERSION="1.4.4"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 BRANCH="${PULSE_BRANCH:-main}"
 REPO_URL="https://github.com/${REPO_SLUG}"
