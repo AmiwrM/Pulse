@@ -13,7 +13,7 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.5.0      Release tag (default: latest)
+#   --release v1.6.0      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
@@ -25,7 +25,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.5.0"
+INSTALLER_VERSION="1.6.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 
@@ -45,6 +45,7 @@ XRAY_DOWNLOAD_URL="${XRAY_DOWNLOAD_URL:-}"
 XRAY_OK=0
 XRAY_PATH=""
 XRAY_ASSET=""
+PULSE_XRAY_PATH="${PULSE_XRAY_PATH:-/usr/local/lib/pulse/xray}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -69,7 +70,7 @@ Options:
   --interval DURATION   Report interval (default: 1s)
   --xray-version VER    Xray release for remote proxy checks (default: v26.11.9)
   --no-xray             Do not install Xray on this agent
-  --force-xray          Reinstall Xray even if it is already installed
+  --force-xray          Reinstall the Pulse-owned Xray copy (system Xray untouched)
   -h, --help            Show this help
 HELP
   exit 0
@@ -165,29 +166,49 @@ ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
 install -d -m 0750 /etc/pulse
 
 install_xray() {
+  use_xray() {
+    XRAY_PATH="$1"
+    if [[ -x "$XRAY_PATH" ]] && "$XRAY_PATH" version >/dev/null 2>&1; then
+      XRAY_OK=1
+      log "Using Xray $("$XRAY_PATH" version 2>/dev/null | sed -n '1p') at $XRAY_PATH"
+      return 0
+    fi
+    return 1
+  }
+
+  if [[ -n "${PULSE_XRAY_BIN:-}" ]]; then
+    if use_xray "$PULSE_XRAY_BIN"; then
+      return 0
+    fi
+    warn "PULSE_XRAY_BIN=$PULSE_XRAY_BIN is not a runnable Xray binary; continuing with auto-detection."
+  fi
+
   if [[ "$INSTALL_XRAY" -eq 0 ]]; then
-    if command -v xray >/dev/null 2>&1; then
-      XRAY_PATH="$(command -v xray)"
-      "$XRAY_PATH" version >/dev/null 2>&1 && XRAY_OK=1
+    if use_xray "$PULSE_XRAY_PATH"; then
+      return 0
+    fi
+    if command -v xray >/dev/null 2>&1 && use_xray "$(command -v xray)"; then
+      warn "Xray installation disabled; using the existing system Xray for temporary loopback checks."
     fi
     return 0
   fi
-  if [[ "$FORCE_XRAY" -eq 0 ]] && command -v xray >/dev/null 2>&1; then
-    XRAY_PATH="$(command -v xray)"
-    if "$XRAY_PATH" version >/dev/null 2>&1; then
-      XRAY_OK=1
-      log "Keeping existing Xray: $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
-      return 0
-    fi
+
+  if [[ "$FORCE_XRAY" -eq 0 ]] && use_xray "$PULSE_XRAY_PATH"; then
+    return 0
   fi
+
   local url
   if [[ "$XRAY_VERSION" == "latest" ]]; then
     url="${XRAY_DOWNLOAD_URL:-https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}}"
   else
     url="${XRAY_DOWNLOAD_URL:-https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ASSET}}"
   fi
-  log "Installing Xray ${XRAY_VERSION} from the official release..."
+  log "Installing a Pulse-owned Xray ${XRAY_VERSION} copy (system Xray stays untouched)..."
   if ! curl -fsSL --retry 4 --retry-delay 2 "$url" -o "$TMP/xray.zip"; then
+    if command -v xray >/dev/null 2>&1 && use_xray "$(command -v xray)"; then
+      warn "Xray download failed; using the existing system Xray for temporary loopback checks."
+      return 0
+    fi
     warn "Could not download Xray. The agent will still report hardware metrics, but proxy handshakes from this server will be skipped."
     return 0
   fi
@@ -195,13 +216,10 @@ install_xray() {
     unzip -q "$TMP/xray.zip" -d "$TMP" || return 0
   fi
   [[ -f "$TMP/xray" ]] || { warn "Xray archive did not contain the xray binary."; return 0; }
-  install -m 0755 "$TMP/xray" /usr/local/bin/xray
-  XRAY_PATH="/usr/local/bin/xray"
-  if "$XRAY_PATH" version >/dev/null 2>&1; then
-    XRAY_OK=1
-    log "Installed Xray: $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
-  else
-    warn "The Xray binary is not runnable on this server."
+  install -d -m 0755 /usr/local/lib/pulse
+  install -m 0755 "$TMP/xray" "$PULSE_XRAY_PATH"
+  if ! use_xray "$PULSE_XRAY_PATH"; then
+    warn "The Pulse Xray copy is not runnable on this server."
     XRAY_PATH=""
   fi
 }

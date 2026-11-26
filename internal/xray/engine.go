@@ -227,6 +227,9 @@ func (e *Engine) testNode(parent context.Context, node Node, testURL string) Res
 	var logs safeBuffer
 	logs.limit = 4096
 	cmd := exec.CommandContext(ctx, status.Path, "run", "-c", configPath)
+	// Keep every temporary core confined to its own directory. The system Xray
+	// service and any VPN panel files are never touched.
+	cmd.Dir = dir
 	cmd.Stdout = &logs
 	cmd.Stderr = &logs
 	if err := cmd.Start(); err != nil {

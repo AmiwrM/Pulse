@@ -214,6 +214,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at DESC);
 
+CREATE TABLE IF NOT EXISTS app_logs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	at INTEGER NOT NULL,
+	level TEXT NOT NULL DEFAULT 'info',
+	category TEXT NOT NULL DEFAULT 'panel',
+	message TEXT NOT NULL,
+	detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_app_logs_at ON app_logs(at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_logs_cat ON app_logs(category, at DESC);
+
 CREATE TABLE IF NOT EXISTS sessions (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	token_hash TEXT NOT NULL UNIQUE,

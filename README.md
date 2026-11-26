@@ -10,8 +10,14 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.5.0
+### خلاصهٔ نسخهٔ 1.6.0
 
+- **زبان انگلیسی** با دکمهٔ EN/FA، چیدمان خودکار LTR/RTL، تاریخ/عدد انگلیسی و ترجمهٔ کل رابط. انتخاب زبان در مرورگر ذخیره می‌شود.
+- **لاگ‌های تفکیک‌شده**: صفحهٔ لاگ با دسته‌های پنل، زمان‌بند، مانیتور، Xray، کلادفلر، اعلان‌ها، ایجنت، امنیت و API؛ ذخیره در SQLite، حفظ ۱۴ روز/۲۰٬۰۰۰ رکورد و فرمان `pulse logs` با فیلتر.
+- **CLI یکدست و کامل** برای پنل و ایجنت: start/stop/restart/status/logs/update/uninstall/version و `pulse port` برای تغییر پورت پنل.
+- **عدم تداخل با Xray موجود**: نصب‌کننده نسخهٔ اختصاصی Pulse را در `/usr/local/lib/pulse/xray` می‌گذارد و به `/usr/local/bin/xray` یا سرویس Xray دست نمی‌زند؛ هسته‌های تست فقط با پورت تصادفی loopback و پوشهٔ موقت اجرا می‌شوند.
+- **پورت پنل قابل تنظیم** با `--port` / `PULSE_PORT` و دستور `pulse port`؛ گزینهٔ `--behind-proxy` برای نودهایی که از قبل Xray/VPN و reverse proxy دارند.
+- **مودال‌های موبایل سبک‌تر**: انیمیشن کوتاه‌تر، بدون سایه/بلور سنگین و جلوگیری از بسته‌شدن اتفاقی با کلیک اطراف.
 - **اتصال زندهٔ ایجنت** با gRPC (و fallback خودکار به WebSocket و سپس REST)؛ گزارش منابع هر **۱ ثانیه** و نمایش فوری وضعیت اتصال/قطع.
 - **تست از ایجنت انتخابی**: هر مانیتور می‌تواند هندشیک کانفیگ، TCP، ICMP، HTTP، DNS یا SSL را از شبکهٔ یک سرور دیگر اجرا کند؛ اگر ایجنت آفلاین باشد، وضعیت «هشدار» ثبت می‌شود و رخداد کاذب باز نمی‌شود.
 - ایجنت قابلیت تست و وضعیت Xray خود را اعلام می‌کند؛ نصب‌کنندهٔ ایجنت Xray رسمی را هم نصب می‌کند تا هندشیک واقعی از همان سرور انجام شود.
@@ -36,6 +42,8 @@
 - [ایجنت سرور](#ایجنت-سرور)
 - [پایش کانفیگ‌های پروکسی](#پایش-کانفیگهای-پروکسی)
 - [تست واقعی پروکسی با Xray](#تست-واقعی-پروکسی-با-xray)
+- [لاگ‌ها](#لاگها)
+- [زبان](#زبان)
 - [API](#api)
 - [پشتیبان‌گیری](#پشتیبانگیری)
 - [امنیت](#امنیت)
@@ -53,7 +61,10 @@
 |---|---|
 | **پایش سرویس** | HTTP/HTTPS (کد وضعیت، کلیدواژه، هدر، بدنه، Basic Auth، دنبال‌کردن ریدایرکت)، TCP، ICMP Ping، DNS (A/AAAA/CNAME/MX/TXT/NS)، گواهی SSL و کانفیگ پروکسی |
 | **تست از ایجنت** | اجرای هر نوع بررسی از شبکهٔ ایجنت انتخابی (مثلاً سرور ایران) برای تست کانفیگ، پینگ، TCP، HTTP، DNS و SSL؛ با تشخیص خطای زیرساخت و بدون رخداد کاذب |
-| **هندشیک واقعی** | موتور Xray v26.11.9 برای VMess/VLESS/Trojan/Shadowsocks/WireGuard؛ اجرای هستهٔ موقت + SOCKS محلی + درخواست HTTP واقعی از داخل تونل |
+| **هندشیک واقعی** | موتور Xray v26.11.9 برای VMess/VLESS/Trojan/Shadowsocks/WireGuard؛ اجرای هستهٔ موقت + SOCKS محلی + درخواست HTTP واقعی از داخل تونل؛ بدون دست‌زدن به Xray سیستمی |
+| **لاگ‌ها** | لاگ ساختاریافتهٔ SQLite با دسته‌بندی پنل/مانیتور/Xray/کلادفلر/اعلان/ایجنت/امنیت/API، صفحهٔ اختصاصی و فرمان `pulse logs` |
+| **زبان** | فارسی و انگلیسی، چیدمان خودکار RTL/LTR، تاریخ و اعداد بومی، ذخیرهٔ انتخاب در مرورگر |
+| **مدیریت** | CLI یکدست پنل/ایجنت: start/stop/restart/status/logs/update/uninstall/version و تغییر پورت پنل |
 | **آپتایم و نمودار** | آپتایم ۲۴ ساعته و ۳۰ روزه، نمودار تأخیر، رخدادها، Sparkline، روند کلی ۲۴ ساعته، تاریخ شمسی و اعداد فارسی |
 | **قوانین هوشمند** | رویدادمحور با آستانه، محدوده، محدودیت زمانی، کانال‌های تلگرام/Web Push/وب‌هوک و ساعات سکوت |
 | **اعلان‌ها** | تلگرام (HTML)، Web Push (PWA روی اندروید و iPhone با iOS 16.4+)، وب‌هوک امضاشده با HMAC-SHA256، سابقه ارسال |
@@ -85,6 +96,16 @@ sudo bash /tmp/pulse-install.sh \
 
 # بدون SSL؛ فقط برای شبکهٔ خصوصی یا وقتی خودتان TLS را مدیریت می‌کنید
 sudo bash /tmp/pulse-install.sh --no-ssl --yes
+
+# روی نودی که از قبل Xray/VPN panel و reverse proxy دارد:
+# فقط روی loopback گوش می‌دهد و به Caddy، پورت ۴۴۳ و فایروال دست نمی‌زند.
+sudo bash /tmp/pulse-install.sh \
+  --behind-proxy https://status.example.com \
+  --port 8080 \
+  --yes
+
+# تغییر پورت داخلی پنل
+sudo bash /tmp/pulse-install.sh --port 8090 --domain status.example.com --yes
 ```
 
 نصب یک‌خطی (اسکریپت برای سؤال SSL از `/dev/tty` استفاده می‌کند):
@@ -116,8 +137,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.5.0
-git push origin v1.5.0
+git tag v1.6.0
+git push origin v1.6.0
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -130,7 +151,7 @@ git push origin v1.5.0
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.5.0 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.6.0 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -153,27 +174,35 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 
 ## دستورهای مدیریت VPS
 
-بعد از نصب نسخهٔ `1.4.3` به بعد، هم پنل و هم ایجنت دستورهای مدیریتی دارند:
+از نسخهٔ `1.6.0` پنل و ایجنت یک مجموعهٔ دستور یکدست دارند. `pulse-agent` و `pulse-a` همان باینری هستند و `pulse agent ...` هم ایجنت را هدف می‌گیرد:
 
 ```bash
-# پنل اصلی
-pulse status
-pulse restart
-pulse logs
-pulse update
+# پنل
+pulse start | stop | restart | status
+pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
+pulse update [--release v1.6.0] [--no-restart]
+pulse port                       # نمایش پورت فعلی
+pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
+pulse uninstall [--purge] [--yes]
+pulse version
 
-# ایجنت (روی سرورهای تحت پایش)
-pulse-agent status
-pulse-agent restart
-pulse-agent logs
+# ایجنت
+pulse-agent start | stop | restart | status
+pulse-agent logs [--lines N] [--follow] [--journal]
 pulse-agent update
+pulse-agent uninstall [--purge] [--yes]
+pulse-agent version
 ```
+
+- `pulse logs` پیش‌فرض از دیتابیس لاگ برنامه می‌خواند؛ `--journal` آن را به journalctl برمی‌گرداند. `pulse-agent logs` همیشه journalctl است چون ایجنت دیتابیس محلی ندارد.
+- `uninstall` سرویس و یونیت را حذف می‌کند ولی دیتابیس/تنظیمات را نگه می‌دارد؛ `--purge` آن‌ها را هم پاک می‌کند. باینری `/usr/local/bin/pulse` عمداً حذف نمی‌شود تا اگر ایجنت روی همان هاست است از کار نیفتد.
+- `pulse port 8090` یونیت systemd و بلوک Caddy پالس را به‌روزرسانی می‌کند، بکاپ می‌گیرد و سرویس‌ها را ری‌استارت/ری‌لود می‌کند. برای تغییر فقط با نصب‌کننده: `install.sh --port 8090`.
 
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.5.0
-pulse-agent update --release v1.5.0
+pulse update --release v1.6.0
+pulse-agent update --release v1.6.0
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -275,7 +304,7 @@ sudo bash install.sh --binary dist/pulse-linux-amd64
 go run ./cmd/pulse --addr 127.0.0.1:8080 --db ./data/pulse.db
 ```
 
-فلگ‌ها: `--addr`، `--db`، `--debug`، `--version`. مقادیر از محیط هم خوانده می‌شوند (`PULSE_ADDR`، `PULSE_DB_PATH`).
+فلگ‌ها: `--addr`، `--port`، `--db`، `--debug`، `--version`. مقادیر از محیط هم خوانده می‌شوند (`PULSE_ADDR`، `PULSE_PORT`، `PULSE_DB_PATH`). `--port` پورت داخل `--addr` را بازنویسی می‌کند.
 
 سرویس نصب‌شده روی `127.0.0.1:8080` گوش می‌دهد تا Caddy در جلوی آن قرار بگیرد. برای مدیریت:
 
@@ -603,6 +632,44 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 
 > تست واقعی برای هر کانفیگ یک پروسهٔ Xray موقت اجرا می‌کند. برای سابسکریپشن‌های بزرگ، فاصلهٔ بررسی را بیشتر و تعداد کانفیگ‌های تست واقعی را محدود نگه دارید.
 
+> **بدون تداخل با Xray سیستمی:** نصب‌کنندهٔ پالس نسخهٔ اختصاصی خودش را در `/usr/local/lib/pulse/xray` نگه می‌دارد، `/usr/local/bin/xray` را بازنویسی نمی‌کند و هیچ سرویس Xray یا پنل VPN را متوقف/ری‌استارت نمی‌کند. هر تست فقط یک هستهٔ موقت با پورت تصادفی `127.0.0.1`، پوشهٔ موقت اختصاصی و همان پروسهٔ فرزند را اجرا/پایان می‌دهد. روی نودی که Xray از قبل روی ۴۴۳ است، از `--behind-proxy` استفاده کنید تا Caddy و پورت ۴۴۳ دست نخورند.
+
+---
+
+## لاگ‌ها
+
+پالس لاگ‌های ساختاریافته را در همان دیتابیس SQLite (جدول `app_logs`) نگه می‌دارد. صفحهٔ **لاگ‌ها** در منوی سیستم، دسته‌های زیر را جدا نشان می‌دهد:
+
+| دسته | نمونه |
+|---|---|
+| `panel` | شروع/توقف پنل، تغییر تنظیمات |
+| `scheduler` | خطاهای زمان‌بند |
+| `monitor` | قطع/بازیابی، تغییر مانیتور، خطای probe |
+| `xray` | وضعیت هسته، تست واقعی، خطای پروکسی |
+| `cloudflare` | تغییر رکورد، failover و خطاهای DNS |
+| `notify` | ارسال موفق/ناموفق تلگرام، Web Push و وب‌هوک |
+| `agent` | اتصال/قطع لینک، ساخت/حذف/چرخش توکن، تست از راه دور |
+| `security` | ورود موفق/ناموفق، محدودیت تلاش و CSRF |
+| `api` | درخواست‌های تغییردهنده و خطاهای API |
+
+- صفحهٔ لاگ فیلتر دسته، سطح (`debug/info/warn/error`) و جستجو دارد و هر ۴ ثانیه به‌روز می‌شود.
+- لاگ‌ها ۱۴ روز یا حداکثر ۲۰٬۰۰۰ رکورد نگه داشته می‌شوند.
+- در CLI:
+
+```bash
+pulse logs --category xray --level warn --lines 100
+pulse logs --follow
+pulse logs --journal          # journalctl خام
+```
+
+- لاگ ایجنت جداگانه در journal همان سرور است: `pulse-agent logs --follow`.
+
+---
+
+## زبان
+
+دکمهٔ **EN/FA** در نوار بالا زبان را عوض می‌کند. در حالت انگلیسی، جهت صفحه LTR می‌شود، تاریخ‌ها میلادی/انگلیسی و اعداد لاتین نمایش داده می‌شوند. انتخاب در `localStorage` مرورگر ذخیره می‌شود و نیازی به تغییر تنظیمات سرور نیست.
+
 ---
 
 ## API
@@ -641,6 +708,7 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 | `GET` | `/api/push/config` | کلید عمومی VAPID |
 | `POST` | `/api/push/subscribe` / `unsubscribe` / `test` | مدیریت Web Push |
 | `GET` | `/api/notifications` | سابقهٔ اعلان |
+| `GET` | `/api/logs` | لاگ‌های ساختاریافته (`category`, `level`, `q`, `after`, `limit`) |
 | `GET` | `/api/audit` | آخرین فعالیت‌ها |
 | `GET` | `/api/backup` | خروجی JSON |
 | `GET` | `/api/stream` | SSE رویدادهای زنده |
@@ -697,7 +765,8 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_ADDR` | `:8080` | آدرس شنود |
+| `PULSE_ADDR` | `:8080` | آدرس شنود کامل (host:port) |
+| `PULSE_PORT` | `8080` | پورت پنل؛ اگر `PULSE_ADDR` تنظیم نشده باشد استفاده می‌شود |
 | `PULSE_DB_PATH` | `./data/pulse.db` | مسیر SQLite |
 | `PULSE_TELEGRAM_TOKEN` | — | توکن ربات؛ بر تنظیمات پنل اولویت دارد |
 | `PULSE_TELEGRAM_CHAT` | — | Chat ID |
@@ -723,7 +792,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.5.0` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.6.0` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -762,8 +831,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.5.0
-git push origin v1.5.0
+git tag v1.6.0
+git push origin v1.6.0
 ```
 
 ---

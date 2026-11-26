@@ -291,6 +291,7 @@ func (a *App) handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.db.AddAudit("admin", "monitor.create", m.Name+" ("+m.Target+")")
+	a.logFor("monitor").Info("monitor created", "monitor", m.Name, "type", m.Type, "target", m.Target, "probe_agent_id", m.ProbeAgentID)
 	a.hub.broadcast("monitor.created", map[string]any{"id": m.ID})
 	if m.Enabled {
 		a.triggerCheck(m.ID)
@@ -342,6 +343,7 @@ func (a *App) handleUpdateMonitor(w http.ResponseWriter, r *http.Request) {
 		a.triggerCheck(id)
 	}
 	a.db.AddAudit("admin", "monitor.update", in.Name)
+	a.logFor("monitor").Info("monitor updated", "monitor", in.Name, "type", in.Type, "target", in.Target, "probe_agent_id", in.ProbeAgentID)
 	a.hub.broadcast("monitor.updated", map[string]any{"id": id})
 	fresh, _ := a.db.GetMonitor(id)
 	writeData(w, map[string]any{"monitor": fresh})
@@ -387,6 +389,7 @@ func (a *App) handleDeleteMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.db.AddAudit("admin", "monitor.delete", m.Name)
+	a.logFor("monitor").Info("monitor deleted", "monitor", m.Name)
 	a.hub.broadcast("monitor.deleted", map[string]any{"id": id})
 	writeData(w, map[string]any{"ok": true})
 }

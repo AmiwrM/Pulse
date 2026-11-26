@@ -1,7 +1,10 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=17';
+import { lineChart, sparkline } from './charts.js?v=18';
+import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=18';
+
+initI18n();
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -29,6 +32,12 @@ const state = {
   pushConfig: null,
   notifications: [],
   audit: [],
+  logs: [],
+  logCategory: 'all',
+  logLevel: 'all',
+  logQuery: '',
+  logTimer: null,
+  routeSub: null,
   pushSubscribed: null,
   filters: { status: 'all', search: '' },
   incidentFilter: 'all',
@@ -49,19 +58,24 @@ const state = {
 };
 
 /* ------------------------------------------------------------------ format */
-const nf0 = new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 0 });
-const nf1 = new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 1 });
-const dtShort = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short' });
-const dtFull = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium', timeStyle: 'short' });
-const clockFmt = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', hour12: false });
-const clockDate = new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long' });
+const EN = getLang() === 'en';
+const LOCALE = EN ? 'en-US' : 'fa-IR';
+const nf0 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 });
+const dtShort = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'short' });
+const dtFull = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
+const clockFmt = new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false });
+const clockDate = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
 
 function num(v, digits = 0) {
   const n = Number(v);
-  if (!Number.isFinite(n)) return '۰';
+  if (!Number.isFinite(n)) return EN ? '0' : '۰';
   return digits === 1 ? nf1.format(n) : nf0.format(n);
 }
-function fa(value) { return String(value).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]); }
+function fa(value) {
+  const text = String(value);
+  return EN ? text : text.replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+}
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -72,16 +86,28 @@ function duration(sec) {
   const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
+  if (EN) {
+    if (d > 0) return `${num(d)} day${d === 1 ? '' : 's'}${h ? ', ' + num(h) + 'h' : ''}`;
+    if (h > 0) return `${num(h)} hour${h === 1 ? '' : 's'}${m ? ', ' + num(m) + 'm' : ''}`;
+    if (m > 0) return `${num(m)} minute${m === 1 ? '' : 's'}${s && m < 3 ? ', ' + num(s) + 's' : ''}`;
+    return `${num(s)} second${s === 1 ? '' : 's'}`;
+  }
   if (d > 0) return `${num(d)} روز${h ? ' و ' + num(h) + ' ساعت' : ''}`;
   if (h > 0) return `${num(h)} ساعت${m ? ' و ' + num(m) + ' دقیقه' : ''}`;
   if (m > 0) return `${num(m)} دقیقه${s && m < 3 ? ' و ' + num(s) + ' ثانیه' : ''}`;
   return `${num(s)} ثانیه`;
 }
 function timeAgo(ts) {
-  if (!ts) return 'هرگز';
+  if (!ts) return EN ? 'never' : 'هرگز';
   const diff = Math.floor(Date.now() / 1000 - Number(ts));
-  if (diff < 0) return 'همین حالا';
-  if (diff < 10) return 'همین حالا';
+  if (diff < 0) return EN ? 'just now' : 'همین حالا';
+  if (diff < 10) return EN ? 'just now' : 'همین حالا';
+  if (EN) {
+    if (diff < 60) return `${num(diff)} seconds ago`;
+    if (diff < 3600) return `${num(Math.floor(diff / 60))} minutes ago`;
+    if (diff < 86400) return `${num(Math.floor(diff / 3600))} hours ago`;
+    return `${num(Math.floor(diff / 86400))} days ago`;
+  }
   if (diff < 60) return `${num(diff)} ثانیه پیش`;
   if (diff < 3600) return `${num(Math.floor(diff / 60))} دقیقه پیش`;
   if (diff < 86400) return `${num(Math.floor(diff / 3600))} ساعت پیش`;
@@ -91,13 +117,20 @@ function dateTime(ts) { return ts ? dtFull.format(new Date(ts * 1000)) : '—'; 
 function dateShort(ts) { return ts ? dtShort.format(new Date(ts * 1000)) : '—'; }
 function bytes(n) {
   n = Number(n) || 0;
+  if (EN) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    if (n < 1024) return `${num(n)} B`;
+    let i = -1;
+    do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+    return `${nf1.format(n)} ${units[i]}`;
+  }
   if (n < 1024) return `${num(n)} بایت`;
   const units = ['کیلوبایت', 'مگابایت', 'گیگابایت', 'ترابایت'];
   let i = -1;
   do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
   return `${nf1.format(n)} ${units[i]}`;
 }
-function uptimePct(v) { return `${nf1.format(Number(v) || 0)}٪`; }
+function uptimePct(v) { return `${nf1.format(Number(v) || 0)}${EN ? '%' : '٪'}`; }
 function daysLeft(ts) {
   if (!ts) return null;
   return Math.floor((Number(ts) * 1000 - Date.now()) / 86400000);
@@ -113,6 +146,7 @@ function typeMeta(type) {
   return TYPES[type] || { label: type || 'نامشخص', short: type || '?', icon: 'globe', color: '#38bdf8' };
 }
 function statusLabel(status) {
+  if (EN) return { up: 'Healthy', down: 'Down', paused: 'Paused', unknown: 'Pending', degraded: 'Warning' }[status] || 'Unknown';
   return { up: 'سالم', down: 'قطع', paused: 'متوقف', unknown: 'در انتظار', degraded: 'هشدار' }[status] || 'نامشخص';
 }
 function sparkColor(status) {
@@ -290,6 +324,7 @@ function toast(message, type = 'info', title = '') {
   el.className = `toast ${type}`;
   el.innerHTML = `<div class="toast-ico">${icon(ico)}</div><div class="toast-body"><div class="toast-title">${esc(title || titles[type] || 'پالس')}</div><div class="toast-msg">${esc(message)}</div></div><button class="toast-close" type="button" aria-label="بستن">×</button>`;
   root.appendChild(el);
+  if (EN) translateDOM(el);
   const remove = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
   el.querySelector('.toast-close').addEventListener('click', remove);
   setTimeout(remove, type === 'error' ? 7000 : 4500);
@@ -308,8 +343,15 @@ function openModal({ title, subtitle = '', body = '', footer = '', size = '', on
     <div class="modal-body">${body}</div>
     ${footer ? `<div class="modal-foot">${footer}</div>` : ''}
   </div></div>`;
+  if (EN) translateDOM(root);
   const backdrop = $('.modal-backdrop', root);
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  backdrop.addEventListener('click', (e) => {
+    if (e.target !== backdrop) return;
+    // On phones the sheet is full width and a stray outside tap (or a scroll
+    // gesture that ends on the backdrop) must not discard a half-filled form.
+    if (window.matchMedia('(max-width: 700px)').matches) return;
+    closeModal();
+  });
   state.modal = { onClose };
   document.body.classList.add('modal-open');
   wireLabels(root);
@@ -401,7 +443,9 @@ function startApp() {
   $('#app').classList.remove('hidden');
   $('#side-version').textContent = fa(state.auth?.version || '');
   $('#avatar-btn').textContent = userNameInitial();
-  document.title = `${state.auth?.site_title || 'پالس'} | مرکز فرمان`;
+  document.title = EN
+    ? `${translateText(state.auth?.site_title || 'Pulse')} | Command center`
+    : `${state.auth?.site_title || 'پالس'} | مرکز فرمان`;
   connectSSE();
   if (!location.hash || location.hash === '#' || location.hash === '#/') {
     history.replaceState(null, '', '#/dashboard');
@@ -421,11 +465,12 @@ function warmSummary() {
 
 function renderAuth(mode, message = '') {
   if (state.sse) { state.sse.close(); state.sse = null; }
+  if (typeof stopLogsPoll === 'function') stopLogsPoll();
   setLive(false);
   $('#app').classList.add('hidden');
   const root = $('#auth-root');
   root.classList.remove('hidden');
-  document.title = 'پالس | ورود به مرکز فرمان';
+  document.title = EN ? 'Pulse | Sign in to the command center' : 'پالس | ورود به مرکز فرمان';
   const isSetup = mode === 'setup';
   const err = message || '';
   root.innerHTML = `<div class="auth-shell">
@@ -460,7 +505,7 @@ function renderAuth(mode, message = '') {
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.5.0')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.6.0')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -745,6 +790,7 @@ const VIEW_META = {
   rules: { title: 'قوانین', crumb: 'اتوماسیون', sub: 'موتور هوشمند هشدار', icon: 'sliders' },
   cloudflare: { title: 'کلادفلر', crumb: 'اتوماسیون', sub: 'DNS و سوییچ خودکار', icon: 'cloud' },
   notifications: { title: 'اعلان‌ها', crumb: 'ارتباط', sub: 'کانال‌ها و سابقه ارسال', icon: 'bell' },
+  logs: { title: 'لاگ‌ها', crumb: 'سیستم', sub: 'رویدادها و خطاهای همهٔ بخش‌ها', icon: 'terminal' },
   settings: { title: 'تنظیمات', crumb: 'سیستم', sub: 'پیکربندی پالس', icon: 'settings' },
 };
 
@@ -752,19 +798,22 @@ function parseHash() {
   const raw = (location.hash || '#/dashboard').replace(/^#\/?/, '');
   const parts = raw.split('/').filter(Boolean);
   const view = VIEW_META[parts[0]] ? parts[0] : 'dashboard';
-  const id = parts[1] ? Number(parts[1]) : null;
-  return { view, id: Number.isFinite(id) && id > 0 ? id : null };
+  const sub = view === 'logs' ? (parts[1] || 'all') : null;
+  const id = sub ? null : (parts[1] ? Number(parts[1]) : null);
+  return { view, id: Number.isFinite(id) && id > 0 ? id : null, sub };
 }
 
 async function route() {
   if (!state.auth?.authenticated) return;
-  const { view, id } = parseHash();
+  const { view, id, sub } = parseHash();
   state.view = view;
   state.routeId = id;
+  state.routeSub = sub;
   state.pendingRefresh = false;
   state.detailEpoch++;
   clearTimeout(state.refreshTimer);
   state.refreshTimer = null;
+  if (view !== 'logs') stopLogsPoll();
   closeConfirm();
   closeModal(true);
   closeUserMenu();
@@ -778,7 +827,9 @@ function updateShell(view) {
   $('#page-title').textContent = meta.title;
   $('#page-crumb').textContent = meta.crumb;
   $('#page-sub').textContent = meta.sub;
-  document.title = `${meta.title} | ${state.auth?.site_title || 'پالس'}`;
+  const translatedTitle = EN ? translateText(meta.title) : meta.title;
+  const siteTitle = state.auth?.site_title || (EN ? 'Pulse' : 'پالس');
+  document.title = `${translatedTitle} | ${EN ? translateText(siteTitle) : siteTitle}`;
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.route === view));
   updateBadges();
 }
@@ -872,6 +923,9 @@ async function loadView(view, id, preserveScroll) {
     } else if (view === 'notifications') {
       await loadNotificationsData();
       if (stale()) return;
+    } else if (view === 'logs') {
+      await loadLogsData({ reset: true });
+      if (stale()) return;
     } else if (view === 'settings') {
       const [settings, audit] = await Promise.all([api('/api/settings'), api('/api/audit?limit=8')]);
       if (stale()) return;
@@ -881,6 +935,7 @@ async function loadView(view, id, preserveScroll) {
     }
     if (stale()) return;
     afterRender();
+    if (EN) translateDOM(document.body);
   } catch (e) {
     if (stale()) return;
     if (e?.status !== 401) renderError(e);
@@ -890,7 +945,8 @@ async function loadView(view, id, preserveScroll) {
 
 async function refreshCurrent(preserve = true) {
   if (!state.auth?.authenticated) return;
-  const { view, id } = parseHash();
+  const { view, id, sub } = parseHash();
+  state.routeSub = sub;
   await loadView(view, preserve ? null : id, preserve);
 }
 
@@ -1057,19 +1113,31 @@ function renderDashboard() {
   const noData = monitors.length === 0;
 
   const heroTitle = hasDown
-    ? `${num(downCount)} سرویس <span style="color:var(--danger-text)">نیاز به توجه</span> دارد`
+    ? (EN
+      ? `${num(downCount)} ${downCount === 1 ? 'service needs' : 'services need'} <span style="color:var(--danger-text)">attention</span>`
+      : `${num(downCount)} سرویس <span style="color:var(--danger-text)">نیاز به توجه</span> دارد`)
     : degradedCount
-      ? `${num(degradedCount)} سرویس <span style="color:var(--warning-text)">هشدار</span> دارد`
+      ? (EN
+        ? `${num(degradedCount)} ${degradedCount === 1 ? 'service has a' : 'services have'} <span style="color:var(--warning-text)">warning</span>`
+        : `${num(degradedCount)} سرویس <span style="color:var(--warning-text)">هشدار</span> دارد`)
       : noData
-        ? 'اولین قدم برای <span>آرامش خاطر</span>'
-        : 'همه‌چیز زیر <span>کنترل</span> است';
+        ? (EN ? 'The first step to <span>peace of mind</span>' : 'اولین قدم برای <span>آرامش خاطر</span>')
+        : (EN ? 'Everything under <span>control</span>' : 'همه‌چیز زیر <span>کنترل</span> است');
   const heroDesc = hasDown
-    ? 'یک یا چند سرویس از دسترس خارج شده‌اند. جزئیات را ببینید و در صورت نیاز، سوییچ خودکار DNS را فعال کنید.'
+    ? (EN
+      ? 'One or more services are unreachable. Review the details and enable automatic DNS failover if needed.'
+      : 'یک یا چند سرویس از دسترس خارج شده‌اند. جزئیات را ببینید و در صورت نیاز، سوییچ خودکار DNS را فعال کنید.')
     : degradedCount
-      ? 'عملکرد یک یا چند سرویس کند یا ناپایدار است. آخرین بررسی‌ها و جزئیات را ببینید.'
+      ? (EN
+        ? 'One or more services are slow or unstable. Review the latest checks and details.'
+        : 'عملکرد یک یا چند سرویس کند یا ناپایدار است. آخرین بررسی‌ها و جزئیات را ببینید.')
       : noData
-        ? 'هنوز مانیتوری نساخته‌اید. یک دامنه، سرور یا کانفیگ اضافه کنید تا پالس از همین لحظه مراقبت را آغاز کند.'
-        : `پالس در ۲۴ ساعت گذشته ${num(stats.total)} سرویس و ${num(stats.agents_total || 0)} سرور را زیر نظر داشته است.`;
+        ? (EN
+          ? 'You have not created a monitor yet. Add a domain, server or config and Pulse starts watching immediately.'
+          : 'هنوز مانیتوری نساخته‌اید. یک دامنه، سرور یا کانفیگ اضافه کنید تا پالس از همین لحظه مراقبت را آغاز کند.')
+        : (EN
+          ? `Pulse monitored ${num(stats.total)} ${Number(stats.total) === 1 ? 'service' : 'services'} and ${num(stats.agents_total || 0)} ${Number(stats.agents_total) === 1 ? 'server' : 'servers'} in the last 24 hours.`
+          : `پالس در ۲۴ ساعت گذشته ${num(stats.total)} سرویس و ${num(stats.agents_total || 0)} سرور را زیر نظر داشته است.`);
 
   $('#view').innerHTML = `
     <section class="panel overview-panel">
@@ -1112,7 +1180,7 @@ function renderDashboard() {
       <div class="panel stat-card">
         <div class="stat-top"><span class="stat-label">آپتایم ۲۴ ساعته</span><span class="stat-ico cyan">${icon('chart')}</span></div>
         <div class="stat-value">${trend.length || monitors.length ? num(gaugePct, 1) : '—'}<small>٪</small></div>
-        <div class="stat-foot"><span class="${gaugePct >= 99 ? 'up' : 'down'}">${gaugePct >= 99 ? 'پایدار' : 'نیازمند توجه'}</span> میانگین همه مانیتورها</div>
+        <div class="stat-foot"><span class="${gaugePct >= 99 ? 'up' : 'down'}">${gaugePct >= 99 ? (EN ? 'Stable' : 'پایدار') : (EN ? 'Needs attention' : 'نیازمند توجه')}</span>${EN ? ' · Average of all monitors' : ' میانگین همه مانیتورها'}</div>
       </div>
       <div class="panel stat-card">
         <div class="stat-top"><span class="stat-label">سرورهای آنلاین</span><span class="stat-ico violet">${icon('server')}</span></div>
@@ -1131,7 +1199,7 @@ function renderDashboard() {
       <div class="panel chart-panel">
         <div class="chart-head">
           <div><div class="chart-title"><span class="live-dot"></span> روند پاسخ‌دهی</div><div class="chart-sub">میانگین تأخیر همه بررسی‌ها در ۲۴ ساعت گذشته</div></div>
-          <div class="chart-legend"><span class="chip">${num(latencyAvg)} ms میانگین</span><span class="chip cyan">۲۴ ساعت</span></div>
+          <div class="chart-legend"><span class="chip">${num(latencyAvg)} ms ${EN ? 'average' : 'میانگین'}</span><span class="chip cyan">${EN ? '24 hours' : '۲۴ ساعت'}</span></div>
         </div>
         <div class="chart-canvas-wrap">
           <canvas id="trendChart"></canvas>
@@ -1413,6 +1481,116 @@ function renderIncidents() {
     <div class="panel panel-pad">
       ${shown.length ? `<div class="incident-list">${shown.map((i) => incidentRow(i, i.ended_at === 0, true)).join('')}</div>` : `<div class="empty"><div class="empty-ico">${icon('shield')}</div><h3>رخدادی در این دسته نیست</h3><p>وقتی وضعیت سرویس‌ها تغییر کند، اینجا با جزئیات ثبت می‌شود.</p></div>`}
     </div>`;
+}
+
+/* ------------------------------------------------------------------ logs */
+const LOG_CATEGORY_LABELS = {
+  all: 'همه', panel: 'پنل', scheduler: 'زمان‌بند', monitor: 'مانیتور',
+  xray: 'Xray', cloudflare: 'کلادفلر', notify: 'اعلان‌ها', agent: 'ایجنت',
+  security: 'امنیت', api: 'API',
+};
+const LOG_LEVEL_LABELS = { all: 'همه', debug: 'دیباگ', info: 'اطلاع', warn: 'هشدار', error: 'خطا' };
+
+function logCategoryLabel(category) { return LOG_CATEGORY_LABELS[category] || category || '—'; }
+function logLevelLabel(level) { return LOG_LEVEL_LABELS[level] || level || '—'; }
+function stopLogsPoll() {
+  if (state.logTimer) { clearInterval(state.logTimer); state.logTimer = null; }
+}
+function startLogsPoll() {
+  stopLogsPoll();
+  state.logTimer = setInterval(() => {
+    if (state.view === 'logs' && !state.modal) refreshLogsList().catch(() => {});
+  }, 4000);
+}
+async function loadLogsData({ reset = false } = {}) {
+  if (state.view !== 'logs') return;
+  if (reset) {
+    state.logCategory = state.routeSub && LOG_CATEGORY_LABELS[state.routeSub] ? state.routeSub : 'all';
+    state.logLevel = 'all';
+    state.logQuery = '';
+  }
+  renderLogs();
+  bindLogFilters();
+  await refreshLogsList();
+  startLogsPoll();
+}
+async function refreshLogsList() {
+  if (state.view !== 'logs') return;
+  const params = new URLSearchParams({ limit: '200' });
+  if (state.logCategory && state.logCategory !== 'all') params.set('category', state.logCategory);
+  if (state.logLevel && state.logLevel !== 'all') params.set('level', state.logLevel);
+  if (state.logQuery.trim()) params.set('q', state.logQuery.trim());
+  const data = await api(`/api/logs?${params.toString()}`);
+  state.logs = data.logs || [];
+  const list = $('#log-list');
+  if (list) {
+    const open = new Set([...list.querySelectorAll('.log-detail[open]')].map((d) => d.closest('.log-row')?.dataset.logId).filter(Boolean));
+    list.innerHTML = logsListHTML();
+    for (const id of open) {
+      const detail = list.querySelector(`.log-row[data-log-id="${id}"] .log-detail`);
+      if (detail) detail.open = true;
+    }
+  }
+  const count = $('[data-log-count]');
+  if (count) count.textContent = `${num(state.logs.length)} رویداد`;
+}
+function logsListHTML() {
+  if (!state.logs.length) {
+    return `<div class="empty" style="padding:36px 16px"><div class="empty-ico" style="width:46px;height:46px">${icon('terminal')}</div><h3 style="font-size:12px">در این دسته لاگی نیست</h3><p style="font-size:10px">با تغییر فیلتر یا منتظر ماندن، رویدادهای جدید اینجا نمایش داده می‌شوند.</p></div>`;
+  }
+  return state.logs.map((entry) => {
+    let detail = entry.detail || '';
+    if (detail) {
+      try { detail = JSON.stringify(JSON.parse(detail), null, 2); } catch { /* keep text */ }
+    }
+    return `<article class="log-row level-${esc(entry.level)}" data-log-id="${entry.id}">
+      <div class="log-row-head">
+        <span class="log-level">${esc(logLevelLabel(entry.level))}</span>
+        <span class="log-category">${esc(logCategoryLabel(entry.category))}</span>
+        <span class="log-time">${dateTime(entry.at)}</span>
+      </div>
+      <div class="log-message">${esc(entry.message)}</div>
+      ${detail ? `<details class="log-detail"><summary>جزئیات فنی</summary><pre>${esc(detail)}</pre></details>` : ''}
+    </article>`;
+  }).join('');
+}
+function renderLogs() {
+  const categories = Object.keys(LOG_CATEGORY_LABELS).map((key) => `<option value="${key}" ${state.logCategory === key ? 'selected' : ''}>${LOG_CATEGORY_LABELS[key]}</option>`).join('');
+  const levels = Object.keys(LOG_LEVEL_LABELS).map((key) => `<option value="${key}" ${state.logLevel === key ? 'selected' : ''}>${LOG_LEVEL_LABELS[key]}</option>`).join('');
+  $('#view').innerHTML = `
+    <div class="page-toolbar log-toolbar">
+      <div class="search-box">${icon('search')}<input id="log-search" placeholder="جستجو در پیام یا جزئیات…" value="${esc(state.logQuery)}" autocomplete="off"></div>
+      <select class="select" id="log-category" aria-label="دستهٔ لاگ">${categories}</select>
+      <select class="select" id="log-level" aria-label="سطح لاگ">${levels}</select>
+      <div class="toolbar-spacer"></div>
+      <div class="page-summary"><span class="badge-dot"><span class="dot"></span><span data-log-count>${num(state.logs.length)} رویداد</span></span></div>
+      <button class="btn btn-sm btn-soft" type="button" data-action="refresh-logs">${icon('refresh')} به‌روزرسانی</button>
+    </div>
+    <div class="banner">
+      <div class="banner-ico">${icon('terminal')}</div>
+      <div class="banner-body"><b>لاگ‌های تفکیک‌شدهٔ پالس</b><p>هر بخش لاگ خودش را دارد: پنل، زمان‌بند، مانیتور، Xray، کلادفلر، اعلان‌ها، ایجنت، امنیت و API. صفحه هر ۴ ثانیه به‌روزرسانی می‌شود.</p></div>
+    </div>
+    <div class="log-list" id="log-list">${logsListHTML()}</div>`;
+}
+function bindLogFilters() {
+  const search = $('#log-search');
+  if (search) {
+    let timer = null;
+    search.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { state.logQuery = search.value; refreshLogsList().catch(() => {}); }, 350);
+    });
+  }
+  $('#log-category')?.addEventListener('change', (e) => {
+    state.logCategory = e.target.value;
+    history.replaceState(null, '', state.logCategory === 'all' ? '#/logs' : `#/logs/${state.logCategory}`);
+    state.routeSub = state.logCategory;
+    refreshLogsList().catch(() => {});
+  });
+  $('#log-level')?.addEventListener('change', (e) => {
+    state.logLevel = e.target.value;
+    refreshLogsList().catch(() => {});
+  });
 }
 
 /* ------------------------------------------------------------------ servers */
@@ -1955,7 +2133,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.5.0')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.6.0')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -2394,6 +2572,7 @@ async function openAgentDetail(id, opts = {}) {
     <span class="chip ${transportChipClass(a)}" data-agent-detail-transport>${agentTransport(a) || 'REST'}</span>
     <span data-agent-detail-seen-inline>آخرین گزارش: ${timeAgo(a.last_seen)}</span>
     <span class="agent-update-hint">${icon('terminal')} <code>pulse-agent update</code></span>
+    <span class="agent-update-hint">${icon('terminal')} <code>pulse-a logs</code></span>
   </div>
   ${a.can_check && online && !a.xray_available ? `<div class="warning-note" style="margin-top:10px">${icon('alert')} <div>برای تست واقعی کانفیگ از این ایجنت، Xray روی آن شناسایی نشده است. نصب‌کنندهٔ جدید ایجنت Xray رسمی را نصب می‌کند؛ برای ایجنت فعلی، Xray را نصب یا ایجنت را با نصب‌کنندهٔ جدید دوباره نصب کنید و سرویس ایجنت را ری‌استارت کنید.</div></div>` : ''}
   <div class="gauges" style="padding:16px 0 8px">
@@ -2571,6 +2750,8 @@ async function onDocumentClick(e) {
       case 'go-notifications': goTo('#/notifications'); closeUserMenu(); break;
       case 'logout': closeUserMenu(); await logout(); break;
       case 'refresh': closeUserMenu(); await loadView(state.view, null, false); break;
+      case 'refresh-logs': await refreshLogsList(); break;
+      case 'toggle-lang': setLang(getLang() === 'en' ? 'fa' : 'en'); location.reload(); break;
       case 'quick-monitor': await openMonitorForm(); break;
       case 'select-monitor-type': {
         const form = $('#monitor-form');

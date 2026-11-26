@@ -190,6 +190,17 @@ type AuditEntry struct {
 	Detail string `json:"detail"`
 }
 
+// LogEntry is one structured application log. Category separates the panel,
+// monitoring, Xray, Cloudflare, notification, agent, security and API streams.
+type LogEntry struct {
+	ID       int64  `json:"id"`
+	At       int64  `json:"at"`
+	Level    string `json:"level"`
+	Category string `json:"category"`
+	Message  string `json:"message"`
+	Detail   string `json:"detail"`
+}
+
 type User struct {
 	ID           int64  `json:"id"`
 	Username     string `json:"username"`

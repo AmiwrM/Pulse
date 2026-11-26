@@ -95,6 +95,33 @@ func TestMonitorProbeAgentAndDelete(t *testing.T) {
 	}
 }
 
+func TestApplicationLogs(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.AddLog(model.LogEntry{At: nowUnix(), Level: "info", Category: "panel", Message: "started"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AddLog(model.LogEntry{At: nowUnix(), Level: "error", Category: "xray", Message: "core failed", Detail: `{"code":1}`}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := db.ListLogs(LogFilter{Limit: 10})
+	if err != nil || len(all) != 2 {
+		t.Fatalf("list logs: %d entries, %v", len(all), err)
+	}
+	xray, err := db.ListLogs(LogFilter{Category: "xray", Level: "error", Query: "core", Limit: 10})
+	if err != nil || len(xray) != 1 || xray[0].Message != "core failed" {
+		t.Fatalf("filtered logs: %+v, %v", xray, err)
+	}
+	db.CleanupLogs(nowUnix()+1, 1)
+	remaining, _ := db.ListLogs(LogFilter{Limit: 10})
+	if len(remaining) != 0 {
+		t.Fatalf("expected cleanup to remove old logs, got %d", len(remaining))
+	}
+}
+
 func TestUsersAndPushSubs(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
 	if err != nil {

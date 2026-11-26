@@ -51,6 +51,7 @@ type App struct {
 	probes *checker.Manager
 	xray   *xray.Engine
 	links  *agentLinkHub
+	logs   *logSink
 	grpc   *grpc.Server
 
 	confMu sync.RWMutex
@@ -105,10 +106,12 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	probes := checker.New(conf.DNSResolver)
 	xrayEngine := xray.NewEngine(conf.XrayBinary)
 	detectCtx, detectCancel := context.WithTimeout(context.Background(), 6*time.Second)
-	xrayEngine.Detect(detectCtx)
+	xrayStatus := xrayEngine.Detect(detectCtx)
 	detectCancel()
 	probes.Xray = xrayEngine
 	probes.SetProxyTestURL(conf.XrayTestURL)
+	logSink := newLogSink(db)
+	logger = slog.New(newDualHandler(logger.Handler(), logSink))
 	a := &App{
 		cfg:        cfg,
 		db:         db,
@@ -118,6 +121,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		probes:     probes,
 		xray:       xrayEngine,
 		links:      newAgentLinkHub(),
+		logs:       logSink,
 		conf:       conf,
 		start:      time.Now(),
 		running:    map[int64]bool{},
@@ -133,10 +137,18 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 5 * time.Second, PermitWithoutStream: true}),
 	)
 	agentproto.RegisterServer(a.grpc, a)
+	a.logger.Info("panel initialized", "addr", cfg.Addr, "db", cfg.DBPath)
+	a.logFor("xray").Info("xray status", "available", xrayStatus.Available,
+		"version", xrayStatus.Version, "path", xrayStatus.Path, "error", xrayStatus.Error)
 	return a, nil
 }
 
-func (a *App) Close() error { return a.db.Close() }
+func (a *App) Close() error {
+	if a.logs != nil {
+		a.logs.close()
+	}
+	return a.db.Close()
+}
 
 func (a *App) config() *config.Settings {
 	a.confMu.RLock()
@@ -218,13 +230,14 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/push/test", a.requireAuth(a.handlePushTest))
 
 	mux.HandleFunc("GET /api/notifications", a.requireAuth(a.handleNotifications))
+	mux.HandleFunc("GET /api/logs", a.requireAuth(a.handleLogs))
 	mux.HandleFunc("GET /api/audit", a.requireAuth(a.handleAudit))
 	mux.HandleFunc("GET /api/backup", a.requireAuth(a.handleBackup))
 	mux.HandleFunc("POST /api/auth/password", a.requireAuth(a.handleChangePassword))
 
 	mux.HandleFunc("/", a.handleStatic)
 
-	return a.recoverer(a.securityHeaders(a.csrfGuard(mux)))
+	return a.recoverer(a.securityHeaders(a.csrfGuard(a.apiLogger(mux))))
 }
 
 func (a *App) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -300,6 +313,7 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.db.AddAudit(body.Username, "setup", "حساب مدیریت ساخته شد")
+	a.logFor("security").Info("admin account created", "username", body.Username, "ip", clientIP(r))
 	a.auth.issue(w, r, body.Username)
 	writeData(w, map[string]any{"username": body.Username})
 }
@@ -307,6 +321,7 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if !a.auth.allow(ip) {
+		a.logFor("security").Warn("login rate limited", "ip", ip)
 		writeErr(w, http.StatusTooManyRequests, "تلاش بیش از حد؛ چند دقیقه دیگر امتحان کنید")
 		return
 	}
@@ -331,16 +346,19 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.auth.fail(ip)
+		a.logFor("security").Warn("login failed", "username", body.Username, "ip", ip)
 		writeErr(w, http.StatusUnauthorized, "نام کاربری یا رمز عبور نادرست است")
 		return
 	}
 	if !a.auth.checkPassword(user.PasswordHash, body.Password) {
 		a.auth.fail(ip)
+		a.logFor("security").Warn("login failed", "username", body.Username, "ip", ip)
 		writeErr(w, http.StatusUnauthorized, "نام کاربری یا رمز عبور نادرست است")
 		return
 	}
 	a.auth.reset(ip)
 	a.auth.issue(w, r, user.Username)
+	a.logFor("security").Info("login succeeded", "username", user.Username, "ip", ip)
 	a.db.AddAudit(user.Username, "login", "ورود موفق از "+ip)
 	writeData(w, map[string]any{"username": user.Username})
 }
@@ -500,12 +518,14 @@ func (a *App) csrfGuard(next http.Handler) http.Handler {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			u, err := url.Parse(origin)
 			if err != nil || !sameHost(u.Host, r) {
+				a.logFor("security").Warn("CSRF origin rejected", "origin", origin, "host", r.Host, "path", r.URL.Path)
 				writeErr(w, http.StatusForbidden, "درخواست از منبع نامعتبر رد شد")
 				return
 			}
 		}
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
 			if r.ContentLength > 0 && !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+				a.logFor("security").Warn("non-JSON API body rejected", "path", r.URL.Path, "content_type", r.Header.Get("Content-Type"))
 				writeErr(w, http.StatusUnsupportedMediaType, "بدنه درخواست باید JSON باشد")
 				return
 			}

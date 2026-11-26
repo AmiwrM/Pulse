@@ -95,6 +95,7 @@ func (a *App) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	installCommand := agentInstallCommand(server, token, body.Name)
 	unit := agentUnit(server, token, body.Name)
 	a.db.AddAudit("admin", "agent.create", body.Name)
+	a.logFor("agent").Info("agent created", "agent", body.Name, "agent_id", ag.ID)
 	a.hub.broadcast("agent.created", map[string]any{"id": ag.ID})
 	writeData(w, map[string]any{
 		"agent": ag, "token": token, "server_url": server,
@@ -129,6 +130,7 @@ func (a *App) handleRotateAgent(w http.ResponseWriter, r *http.Request) {
 	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 1s",
 		shellQuote(server), shellQuote(token), shellQuote(ag.Name))
 	a.db.AddAudit("admin", "agent.rotate", ag.Name)
+	a.logFor("agent").Info("agent token rotated", "agent", ag.Name, "agent_id", id)
 	writeData(w, map[string]any{
 		"token": token, "command": command, "server_url": server,
 		"install_command":  agentInstallCommand(server, token, ag.Name),
@@ -184,6 +186,7 @@ func (a *App) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.db.AddAudit("admin", "agent.delete", ag.Name)
+	a.logFor("agent").Info("agent deleted", "agent", ag.Name, "agent_id", id)
 	a.hub.broadcast("agent.deleted", map[string]any{"agent_id": id})
 	writeData(w, map[string]any{"ok": true})
 }

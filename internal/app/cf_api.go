@@ -85,6 +85,7 @@ func (a *App) handleCFUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.db.AddAudit("admin", "cloudflare.update", rec.Name+" → "+rec.Content)
+	a.logFor("cloudflare").Info("cloudflare record updated manually", "record", rec.Name, "content", rec.Content)
 	a.hub.broadcast("cloudflare.updated", map[string]any{"record": rec})
 	writeData(w, map[string]any{"record": rec})
 }
@@ -142,6 +143,11 @@ func (a *App) applyCFFailover(m model.Monitor, mode string) {
 }
 
 func (a *App) logCFAction(m model.Monitor, ok bool, message string) {
+	if ok {
+		a.logFor("cloudflare").Info("cloudflare DNS action", "monitor", m.Name, "message", message)
+	} else {
+		a.logFor("cloudflare").Warn("cloudflare DNS action failed", "monitor", m.Name, "message", message)
+	}
 	now := nowUnix()
 	_ = a.db.UpdateMonitorCFAction(m.ID, message, now)
 	_ = a.db.InsertNotification(&model.NotificationLog{

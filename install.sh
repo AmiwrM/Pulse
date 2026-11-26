@@ -19,7 +19,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.5.0"
+INSTALLER_VERSION="1.6.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 BRANCH="${PULSE_BRANCH:-main}"
 REPO_URL="https://github.com/${REPO_SLUG}"
@@ -29,6 +29,7 @@ DOMAIN="${DOMAIN:-}"
 EMAIL="${EMAIL:-}"
 USE_SSL="ask"
 ASSUME_YES=0
+BEHIND_PROXY_URL="${BEHIND_PROXY_URL:-}"
 BINARY_PATH="${PULSE_BINARY_PATH:-}"
 BINARY_URL="${PULSE_BINARY_URL:-}"
 PULSE_RELEASE="${PULSE_VERSION:-latest}"
@@ -42,6 +43,7 @@ XRAY_VERSION="${XRAY_VERSION:-v26.11.9}"
 XRAY_DOWNLOAD_URL="${XRAY_DOWNLOAD_URL:-}"
 XRAY_OK=0
 XRAY_PATH=""
+PULSE_XRAY_PATH="${PULSE_XRAY_PATH:-/usr/local/lib/pulse/xray}"
 SSL_OK=0
 DNS_OK=1
 PUBLIC_BASE_URL=""
@@ -75,9 +77,10 @@ Options:
   --admin-pass PASS      Admin password (default: generated random password)
   --no-admin             Do not create the admin account automatically
   --port PORT            Pulse HTTP port (default: 8080)
+--behind-proxy URL     Bind on loopback and use an existing reverse proxy (no Caddy/443)
   --xray-version VERSION Xray version, or "latest" (default: v26.11.9)
   --no-xray              Do not install Xray
-  --force-xray           Reinstall Xray even if already present
+  --force-xray           Reinstall the Pulse-owned Xray copy (system Xray untouched)
   -h, --help             Show this help
   --installer-version    Show installer version
 
@@ -107,6 +110,7 @@ while [[ $# -gt 0 ]]; do
     --admin-pass) ADMIN_PASS="$2"; shift 2 ;;
     --no-admin) NO_ADMIN=1; shift ;;
     --port) PORT="$2"; shift 2 ;;
+--behind-proxy) BEHIND_PROXY_URL="$2"; shift 2 ;;
     --xray-version) XRAY_VERSION="$2"; FORCE_XRAY=1; shift 2 ;;
     --no-xray) INSTALL_XRAY=0; shift ;;
     --force-xray) FORCE_XRAY=1; shift ;;
@@ -141,6 +145,11 @@ ask() {
 }
 
 # ------------------------------------------------------------------ prompts
+if [[ -n "$BEHIND_PROXY_URL" ]]; then
+  [[ "$BEHIND_PROXY_URL" == http://* || "$BEHIND_PROXY_URL" == https://* ]] || die "--behind-proxy must be an http:// or https:// URL"
+  USE_SSL="no"
+  DOMAIN=""
+fi
 if [[ -n "$DOMAIN" && "$USE_SSL" == "ask" ]]; then
   USE_SSL="yes"
 fi
@@ -428,25 +437,40 @@ PULSE_BIN_VERSION="$("$PULSE_SRC" --version 2>/dev/null | sed -n '1p' || true)"
 log "Prepared $PULSE_BIN_VERSION ($PULSE_SRC_KIND)."
 
 # ------------------------------------------------------------------ Xray
+#
+# Pulse only ever needs a short-lived, loopback-only core for proxy checks.
+# Install a Pulse-owned copy under /usr/local/lib/pulse and never overwrite or
+# restart an existing Xray binary/service that a VPN panel may be using.
 install_xray() {
+  use_xray() {
+    XRAY_PATH="$1"
+    if [[ -x "$XRAY_PATH" ]] && "$XRAY_PATH" version >/dev/null 2>&1; then
+      XRAY_OK=1
+      log "Using Xray $("$XRAY_PATH" version 2>/dev/null | sed -n '1p') at $XRAY_PATH"
+      return 0
+    fi
+    return 1
+  }
+
+  if [[ -n "${PULSE_XRAY_BIN:-}" ]]; then
+    if use_xray "$PULSE_XRAY_BIN"; then
+      return 0
+    fi
+    warn "PULSE_XRAY_BIN=$PULSE_XRAY_BIN is not a runnable Xray binary; continuing with auto-detection."
+  fi
+
   if [[ "$INSTALL_XRAY" -eq 0 ]]; then
-    if command -v xray >/dev/null 2>&1; then
-      XRAY_PATH="$(command -v xray)"
-      if "$XRAY_PATH" version >/dev/null 2>&1; then
-        XRAY_OK=1
-        log "Skipping Xray installation; using existing $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
-      fi
+    if use_xray "$PULSE_XRAY_PATH"; then
+      return 0
+    fi
+    if command -v xray >/dev/null 2>&1 && use_xray "$(command -v xray)"; then
+      warn "Xray installation disabled; using the existing system Xray. Pulse will only run it with temporary loopback configs."
     fi
     return 0
   fi
-  if [[ "$FORCE_XRAY" -eq 0 ]] && command -v xray >/dev/null 2>&1; then
-    XRAY_PATH="$(command -v xray)"
-    if "$XRAY_PATH" version >/dev/null 2>&1; then
-      XRAY_OK=1
-      log "Keeping existing Xray: $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
-      return 0
-    fi
-    warn "Existing Xray binary is not runnable; reinstalling."
+
+  if [[ "$FORCE_XRAY" -eq 0 ]] && use_xray "$PULSE_XRAY_PATH"; then
+    return 0
   fi
 
   local url
@@ -455,15 +479,11 @@ install_xray() {
   else
     url="${XRAY_DOWNLOAD_URL:-https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ASSET}}"
   fi
-  log "Installing Xray ${XRAY_VERSION} from the official release..."
+  log "Installing a Pulse-owned Xray ${XRAY_VERSION} copy (system Xray stays untouched)..."
   if ! curl -fsSL --retry 4 --retry-delay 2 "$url" -o "$TMPDIR_INSTALL/xray.zip"; then
-    if command -v xray >/dev/null 2>&1; then
-      XRAY_PATH="$(command -v xray)"
-      if "$XRAY_PATH" version >/dev/null 2>&1; then
-        XRAY_OK=1
-        warn "Xray download failed; keeping the existing binary at $XRAY_PATH."
-        return 0
-      fi
+    if command -v xray >/dev/null 2>&1 && use_xray "$(command -v xray)"; then
+      warn "Xray download failed; using the existing system Xray for temporary loopback checks."
+      return 0
     fi
     warn "Could not download Xray from $url. Pulse will work, but real proxy tests will be disabled."
     return 0
@@ -475,16 +495,14 @@ install_xray() {
     warn "Xray archive did not contain the xray binary."
     return 0
   fi
-  install -m 0755 "$TMPDIR_INSTALL/xray" /usr/local/bin/xray
-  XRAY_PATH="/usr/local/bin/xray"
-  if ! "$XRAY_PATH" version >/dev/null 2>&1; then
-    warn "Xray binary is not runnable on this server."
+  install -d -m 0755 /usr/local/lib/pulse
+  install -m 0755 "$TMPDIR_INSTALL/xray" "$PULSE_XRAY_PATH"
+  if ! use_xray "$PULSE_XRAY_PATH"; then
+    warn "The Pulse Xray copy is not runnable on this server."
     XRAY_OK=0
     XRAY_PATH=""
     return 0
   fi
-  XRAY_OK=1
-  log "Installed Xray: $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
 }
 install_xray
 
@@ -508,7 +526,10 @@ ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
 ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
 INSTALLED_VERSION="$(/usr/local/bin/pulse --version 2>/dev/null | sed -n '1p' || echo 'pulse')"
 
-if [[ "$USE_SSL" == "yes" ]]; then
+if [[ -n "$BEHIND_PROXY_URL" ]]; then
+  FINAL_BIND="127.0.0.1:$PORT"
+  PUBLIC_BASE_URL="${BEHIND_PROXY_URL%/}"
+elif [[ "$USE_SSL" == "yes" ]]; then
   FINAL_BIND="127.0.0.1:$PORT"
   PUBLIC_BASE_URL="https://$DOMAIN"
 else
@@ -639,7 +660,16 @@ if [[ "$NO_ADMIN" -eq 0 ]]; then
 fi
 
 # ------------------------------------------------------------------ expose panel
-if [[ "$USE_SSL" == "yes" ]]; then
+if [[ -n "$BEHIND_PROXY_URL" ]]; then
+  log "Behind-proxy mode: Pulse stays on 127.0.0.1:$PORT; Caddy, ports 80/443 and firewall entries are left untouched."
+  write_unit "$FINAL_BIND"
+  systemctl daemon-reload
+  systemctl restart pulse
+  for _ in $(seq 1 20); do
+    curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 && break
+    sleep 1
+  done
+elif [[ "$USE_SSL" == "yes" ]]; then
   log "Configuring Caddy for https://$DOMAIN ..."
   install -d -m 0755 /etc/caddy /etc/caddy/conf.d
   PULSE_CADDY="/etc/caddy/conf.d/pulse.caddy"
@@ -712,7 +742,10 @@ echo "============================================================"
 echo " Version    : ${INSTALLED_VERSION#pulse }"
 echo " Source     : $PULSE_SRC_KIND (${PULSE_RELEASE})"
 echo " Panel URL  : $PUBLIC_BASE_URL"
-if [[ "$USE_SSL" == "yes" ]]; then
+if [[ -n "$BEHIND_PROXY_URL" ]]; then
+  echo " Proxy      : behind existing reverse proxy at $PUBLIC_BASE_URL"
+  echo " Bind       : 127.0.0.1:$PORT (Caddy/443 untouched)"
+elif [[ "$USE_SSL" == "yes" ]]; then
   if [[ "$SSL_OK" -eq 1 ]]; then
     echo " HTTPS      : enabled (Caddy, automatic Let's Encrypt)"
     if [[ "$DNS_OK" -eq 0 ]]; then

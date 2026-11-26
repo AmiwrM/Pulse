@@ -234,7 +234,7 @@ func (s *agentSession) handleEvent(ev *agentproto.AgentEvent) {
 			report.IP = s.ip
 		}
 		if err := s.app.applyAgentReport(s.agentID, report, s.transport); err != nil {
-			s.app.logger.Warn("agent link report", "agent", s.agentID, "transport", s.transport, "error", err)
+			s.app.logFor("agent").Warn("agent link report", "agent", s.agentID, "transport", s.transport, "error", err)
 		}
 	case agentproto.EventCheck:
 		if ev.Check != nil {
@@ -332,12 +332,14 @@ func (a *App) onAgentLinkUp(s *agentSession) {
 	a.linkSeen[s.agentID] = true
 	a.presenceMu.Unlock()
 	if err := a.db.TouchAgent(s.agentID, nowUnix()); err != nil {
-		a.logger.Warn("touch agent", "agent", s.agentID, "error", err)
+		a.logFor("agent").Warn("touch agent", "agent", s.agentID, "error", err)
 	}
+	a.logFor("agent").Info("agent link connected", "agent", s.agentName, "agent_id", s.agentID, "transport", s.transport, "ip", s.ip)
 	a.broadcastAgentLink(s, true)
 }
 
 func (a *App) onAgentLinkDown(s *agentSession) {
+	a.logFor("agent").Info("agent link disconnected", "agent", s.agentName, "agent_id", s.agentID, "transport", s.transport, "reason", s.linkError().Error())
 	a.hub.broadcast("agent.link", map[string]any{
 		"agent_id": s.agentID, "connected": false, "transport": "",
 	})
@@ -429,6 +431,7 @@ func (a *App) Connect(stream grpc.ServerStream) error {
 	md, _ := metadata.FromIncomingContext(stream.Context())
 	ag, err := a.agentFromToken(agentTokenFromMetadata(md))
 	if err != nil {
+		a.logFor("agent").Warn("gRPC link rejected", "error", err)
 		return err
 	}
 	ip := ""
@@ -477,6 +480,7 @@ func (a *App) Connect(stream grpc.ServerStream) error {
 func (a *App) handleAgentLinkWS(w http.ResponseWriter, r *http.Request) {
 	ag, err := a.agentFromToken(agentToken(r))
 	if err != nil {
+		a.logFor("agent").Warn("WebSocket link rejected", "error", err)
 		writeErr(w, http.StatusUnauthorized, "توکن ایجنت معتبر نیست")
 		return
 	}
@@ -541,6 +545,7 @@ func (a *App) runRemoteMonitor(ctx context.Context, m model.Monitor) checker.Res
 	}
 	sess := a.links.get(m.ProbeAgentID)
 	if sess == nil {
+		a.logFor("agent").Warn("remote check without live link", "agent", name, "agent_id", m.ProbeAgentID, "monitor", m.Name)
 		return remoteFailure(m.ProbeAgentID, name, m.ProbeAgentName, "اتصال زندهٔ ایجنت برقرار نیست؛ ایجنت را به‌روزرسانی و ری‌استارت کنید")
 	}
 	testURL := a.probes.ProxyTestURL()
@@ -549,6 +554,7 @@ func (a *App) runRemoteMonitor(ctx context.Context, m model.Monitor) checker.Res
 		Config: m.Config, TestURL: testURL,
 	})
 	if err != nil {
+		a.logFor("agent").Warn("remote check failed", "agent", name, "agent_id", m.ProbeAgentID, "monitor", m.Name, "error", err)
 		return remoteFailure(m.ProbeAgentID, name, m.ProbeAgentName, "اجرای تست روی ایجنت ناموفق بود: "+err.Error())
 	}
 	out := checker.Result{

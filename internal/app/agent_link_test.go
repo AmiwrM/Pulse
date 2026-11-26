@@ -28,7 +28,7 @@ import (
 func newLinkTestApp(t *testing.T) (*App, *model.Agent, string) {
 	t.Helper()
 	a, err := New(Config{
-		Addr: "127.0.0.1:0", DBPath: filepath.Join(t.TempDir(), "pulse.db"), Version: "1.5.0-test",
+		Addr: "127.0.0.1:0", DBPath: filepath.Join(t.TempDir(), "pulse.db"), Version: "1.6.0-test",
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func newLinkTestApp(t *testing.T) (*App, *model.Agent, string) {
 
 func testReport() *model.AgentReport {
 	return &model.AgentReport{
-		Hostname: "iran-probe", OS: "linux", Arch: "amd64", Version: "1.5.0-test",
+		Hostname: "iran-probe", OS: "linux", Arch: "amd64", Version: "1.6.0-test",
 		CPUPct: 42.5, RAMPct: 51, DiskPct: 20, Load1: 0.7,
 		NetRx: 1500, NetTx: 500, RAMTotal: 1 << 30, DiskTotal: 10 << 30,
 		Services: json.RawMessage("[]"), WireGuard: json.RawMessage("[]"),
@@ -135,7 +135,7 @@ func TestGRPCAgentLinkReportsAndRunsRemoteCheck(t *testing.T) {
 		t.Fatalf("expected hello ack, got %+v", helloAck)
 	}
 	if err := stream.Send(&agentproto.AgentEvent{Type: agentproto.EventHello, Hello: &agentproto.Hello{
-		Version: "1.5.0-test", Hostname: "iran-probe", CanCheck: true,
+		Version: "1.6.0-test", Hostname: "iran-probe", CanCheck: true,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestWebSocketAgentLinkReportsAndRunsRemoteCheck(t *testing.T) {
 		t.Fatalf("expected hello ack, got %+v", helloAck)
 	}
 	if err := wsjson.Write(ctx, conn, &agentproto.AgentEvent{Type: agentproto.EventHello, Hello: &agentproto.Hello{
-		Version: "1.5.0-test", Hostname: "iran-probe", CanCheck: true,
+		Version: "1.6.0-test", Hostname: "iran-probe", CanCheck: true,
 	}}); err != nil {
 		t.Fatal(err)
 	}

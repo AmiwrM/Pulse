@@ -83,7 +83,7 @@ func TestRunnerWebSocketLinkAndRemoteCheck(t *testing.T) {
 	defer srv.Close()
 
 	opts := Options{
-		Server: srv.URL, Token: "test-token", Name: "ws-agent", Version: "1.5.0-test",
+		Server: srv.URL, Token: "test-token", Name: "ws-agent", Version: "1.6.0-test",
 		Interval: time.Second, XrayBin: "xray-not-installed",
 	}
 	runner := newAgentRunner(opts, slog.New(slog.NewTextHandler(io.Discard, nil)))

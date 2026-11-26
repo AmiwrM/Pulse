@@ -1,9 +1,20 @@
 /* Pulse charts — tiny dependency-free canvas charts with hover tooltips. */
+import { getLang } from './i18n.js?v=18';
 
-const fa = (s) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
-const fmtTime = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit' });
-const fmtDateTime = new Intl.DateTimeFormat('fa-IR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const fmtNum = new Intl.NumberFormat('fa-IR');
+const isEN = () => getLang() === 'en';
+const fa = (s) => isEN() ? String(s) : String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+const formatterCache = {};
+function formatter(kind) {
+  const locale = isEN() ? 'en-US' : 'fa-IR';
+  const key = locale + kind;
+  if (formatterCache[key]) return formatterCache[key];
+  let value;
+  if (kind === 'num') value = new Intl.NumberFormat(locale);
+  else if (kind === 'time') value = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
+  else value = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  formatterCache[key] = value;
+  return value;
+}
 
 function ink() {
   const light = document.documentElement.dataset.theme === 'light';
@@ -134,7 +145,7 @@ export function lineChart(canvas, options = {}) {
       for (let i = 0; i < labelCount; i++) {
         const t = minX + (spanX / (labelCount - 1 || 1)) * i;
         const x = X(t);
-        const label = options.xFormat ? options.xFormat(t) : fmtTime.format(new Date(t * 1000));
+        const label = options.xFormat ? options.xFormat(t) : formatter('time').format(new Date(t * 1000));
         ctx.fillStyle = theme.labelSoft;
         ctx.fillText(label, Math.max(axis.l + 14, Math.min(x, axis.l + cw - 14)), axis.t + ch + 9);
       }
@@ -241,10 +252,10 @@ export function lineChart(canvas, options = {}) {
     const time = new Date(base[best].x * 1000);
     const rows = series.map((s) => {
       const m = nearest(s.points, base[best].x);
-      const val = m ? (options.tipFormat ? options.tipFormat(m.y, s) : fa(fmtNum.format(Math.round(m.y)))) : '—';
+      const val = m ? (options.tipFormat ? options.tipFormat(m.y, s) : fa(formatter('num').format(Math.round(m.y)))) : '-';
       return `<div class="tt-row"><span><i class="tt-dot" style="background:${s.color}"></i>${escapeHtml(s.name)}</span><b>${val}</b></div>`;
     }).join('');
-    tip.innerHTML = `${rows}<div class="tt-time">${fmtDateTime.format(time)}</div>`;
+    tip.innerHTML = `${rows}<div class="tt-time">${formatter('datetime').format(time)}</div>`;
     const x = (axisL + ratio * cw);
     tip.style.left = `${Math.max(55, Math.min(x, rect.width - 55))}px`;
     tip.style.top = `${rect.height * 0.55}px`;

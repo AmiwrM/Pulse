@@ -140,6 +140,7 @@ func (a *App) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	a.db.AddAudit("admin", "settings.update", "تنظیمات سامانه به‌روزرسانی شد")
+	a.logFor("panel").Info("settings updated", "ip", clientIP(r))
 	a.hub.broadcast("settings.updated", map[string]any{})
 	writeData(w, a.settingsView())
 }

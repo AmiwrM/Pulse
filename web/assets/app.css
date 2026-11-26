@@ -206,6 +206,7 @@ img, svg, canvas { display: block; }
 .icon-btn { width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--line); background: rgba(12, 19, 35, .6); display: grid; place-items: center; color: var(--muted); transition: .2s; }
 .icon-btn:hover { color: var(--text); border-color: var(--line-strong); background: rgba(20, 30, 52, .8); transform: translateY(-1px); }
 .icon-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.lang-toggle { font-size: 10px; font-weight: 700; letter-spacing: .3px; }
 .live-pill { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(52, 211, 153, .2); background: rgba(52, 211, 153, .07); color: #86efac; font-size: 11px; font-weight: 500; }
 .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); position: relative; }
 .pulse-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid rgba(52, 211, 153, .55); animation: pulseRing 1.8s ease-out infinite; }
@@ -470,6 +471,28 @@ img, svg, canvas { display: block; }
 .agent-foot svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 
 .rule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+
+/* ------------------------------------------------------------------ logs page */
+.log-toolbar { margin-bottom: 14px; }
+.log-toolbar .select { width: auto; min-width: 128px; flex: 0 0 auto; }
+.log-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.log-row { padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(130, 160, 220, .025); }
+.log-row-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.log-level { padding: 2px 7px; border-radius: 6px; font-size: 9px; font-weight: 600; background: rgba(56, 189, 248, .1); color: #7dd3fc; }
+.log-row.level-debug .log-level { background: rgba(130, 160, 220, .08); color: var(--muted); }
+.log-row.level-warn .log-level { background: rgba(251, 191, 36, .1); color: #fcd34d; }
+.log-row.level-error .log-level { background: rgba(251, 113, 133, .1); color: #fda4af; }
+.log-category { font-size: 9px; color: var(--muted); }
+.log-time { margin-inline-start: auto; font-size: 9px; color: var(--faint); font-family: var(--mono); direction: ltr; }
+.log-message { margin-top: 6px; font-size: 11.5px; color: var(--text-soft); overflow-wrap: anywhere; }
+.log-detail { margin-top: 7px; font-size: 9px; color: var(--faint); }
+.log-detail summary { cursor: pointer; }
+.log-detail pre { margin-top: 6px; padding: 9px 10px; border-radius: 8px; background: rgba(4, 8, 16, .45); border: 1px solid var(--line); color: var(--muted); font-family: var(--mono); font-size: 8.5px; direction: ltr; text-align: left; max-height: 180px; overflow: auto; white-space: pre-wrap; }
+html[data-theme="light"] .log-row { background: rgba(255, 255, 255, .62); }
+html[data-theme="light"] .log-level { color: #0369a1; }
+html[data-theme="light"] .log-row.level-warn .log-level { color: #a16207; }
+html[data-theme="light"] .log-row.level-error .log-level { color: #be123c; }
+html[data-theme="light"] .log-detail pre { background: #f5f9ff; color: #31506f; }
 .rule-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; transition: .25s; }
 .rule-card:hover { border-color: var(--line-strong); }
 .rule-card.disabled { opacity: .55; }
@@ -638,6 +661,7 @@ input[type="range"] { accent-color: #0ea5e9; height: 4px; width: 100%; }
    opacity 0 made it look transparent if the user opened it and took a
    screenshot before the animation ended. Only the position is animated now. */
 @keyframes modalPop { from { transform: translateY(14px) scale(.985); } to { transform: none; } }
+@keyframes sheetIn { from { transform: translateY(18px); } to { transform: none; } }
 .modal-head { display: flex; align-items: flex-start; gap: 12px; padding: 19px 22px 14px; border-bottom: 1px solid var(--line); background: rgba(10, 16, 30, .5); }
 .modal-head-copy { flex: 1; min-width: 0; }
 .modal-head h3 { font-size: 15.5px; font-weight: 650; }
@@ -848,6 +872,8 @@ button.is-busy { cursor: progress; opacity: .8; }
 @media (max-width: 1020px) {
   .sidebar { transform: translateX(105%); box-shadow: -30px 0 80px rgba(0, 0, 0, .6); }
   .sidebar.open { transform: none; }
+  html[dir="ltr"] .sidebar { transform: translateX(-105%); box-shadow: 30px 0 80px rgba(0, 0, 0, .6); }
+  html[dir="ltr"] .sidebar.open { transform: none; }
   .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(3, 6, 13, .6); backdrop-filter: blur(4px); opacity: 0; visibility: hidden; transition: .25s; }
   .sidebar.open ~ .sidebar-backdrop, .sidebar-backdrop.show { opacity: 1; visibility: visible; }
   .main { margin-inline-start: 0; }
@@ -903,13 +929,20 @@ button.is-busy { cursor: progress; opacity: .8; }
   .section-head p { font-size: 10px; }
   .page-toolbar { gap: 7px; }
   .search-box { max-width: 100%; flex: 1 1 100%; }
+  .log-toolbar .select { flex: 1 1 130px; min-width: 0; }
+  .log-time { width: 100%; margin-inline-start: 0; }
   .segmented { overflow-x: auto; max-width: 100%; }
   .segmented button { white-space: nowrap; }
   .form-grid { grid-template-columns: 1fr; }
   .type-picker { grid-template-columns: 1fr 1fr; }
-  .modal-backdrop { padding: 0; align-items: flex-end; }
-  .modal { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; border-bottom: 0; }
+  .modal-backdrop { padding: 0; align-items: flex-end; background: rgba(3, 6, 13, .7); }
+  .modal {
+    width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; border-bottom: 0;
+    box-shadow: 0 -12px 44px -28px rgba(0, 0, 0, .9);
+    animation: sheetIn .16s cubic-bezier(.2, .8, .2, 1); will-change: transform;
+  }
   .modal.lg, .modal.sm { width: 100%; }
+  .modal-body { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .modal-head, .modal-body, .modal-foot { padding-inline: 16px; }
   .modal-foot { padding-bottom: calc(13px + env(safe-area-inset-bottom)); }
   .toast-root { inset-inline: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); align-items: stretch; }
@@ -990,6 +1023,21 @@ html[data-theme="light"] .noise { opacity: .012; }
 html[data-theme="light"] .sidebar { background: linear-gradient(180deg, rgba(255, 255, 255, .95), rgba(246, 250, 255, .91)); }
 html[data-theme="light"] .sidebar::after { background: linear-gradient(180deg, transparent, rgba(14, 165, 233, .3), transparent); }
 html[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(248, 251, 255, .97), rgba(248, 251, 255, .8) 72%, transparent); }
+
+/* LTR (English) overrides: logical properties already flip the layout; these
+   are the few intentionally hard-coded RTL alignments and the drawer side. */
+html[dir="ltr"] .brand-text small { text-align: left; }
+html[dir="ltr"] .record-table th,
+html[dir="ltr"] .log-table th,
+html[dir="ltr"] .node-table th { text-align: left; }
+html[dir="ltr"] .mc-target,
+html[dir="ltr"] .agent-host,
+html[dir="ltr"] .record-name,
+html[dir="ltr"] .sys-item b,
+html[dir="ltr"] .input.ltr,
+html[dir="ltr"] .detail-title .target { text-align: left; }
+html[dir="ltr"] .user-pop button { text-align: left; }
+html[dir="ltr"] .mc-warn { left: auto; right: 13px; }
 html[data-theme="light"] .nav-item:hover { background: rgba(30, 64, 110, .055); }
 html[data-theme="light"] .nav-item.active { color: #073b63; background: linear-gradient(90deg, rgba(14, 165, 233, .13), rgba(99, 102, 241, .06)); box-shadow: inset 0 0 0 1px rgba(14, 165, 233, .11); }
 html[data-theme="light"] .nav-glow { background: radial-gradient(180px 60px at 30% 50%, rgba(14, 165, 233, .11), transparent); }

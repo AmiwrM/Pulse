@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,14 +16,19 @@ import (
 	"pulse/internal/app"
 )
 
-var version = "1.5.0"
+var version = "1.6.0"
 
 func main() {
 	if handleManagementCLI(os.Args[1:]) {
 		return
 	}
+	addrDefault := env("PULSE_ADDR", "")
+	if addrDefault == "" {
+		addrDefault = ":" + env("PULSE_PORT", "8080")
+	}
 	var (
-		addr      = flag.String("addr", env("PULSE_ADDR", ":8080"), "HTTP listen address")
+		addr      = flag.String("addr", addrDefault, "HTTP listen address (host:port)")
+		port      = flag.Int("port", 0, "HTTP listen port (overrides the port in --addr)")
 		dbPath    = flag.String("db", env("PULSE_DB_PATH", "./data/pulse.db"), "SQLite database path")
 		debug     = flag.Bool("debug", false, "enable debug logging")
 		showVer   = flag.Bool("version", false, "print version")
@@ -37,6 +43,13 @@ func main() {
 		xrayBin   = flag.String("xray-bin", env("PULSE_XRAY_BIN", "xray"), "Xray binary used for remote proxy checks (agent mode)")
 	)
 	flag.Parse()
+	if *port < 0 || *port > 65535 {
+		fmt.Fprintln(os.Stderr, "invalid --port: use 1..65535")
+		os.Exit(2)
+	}
+	if *port > 0 {
+		*addr = withPort(*addr, *port)
+	}
 
 	if *showVer {
 		os.Stdout.WriteString("pulse " + version + "\n")

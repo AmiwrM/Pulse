@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.6.0
+
+- Added a full **English** UI with an EN/FA toggle, automatic LTR layout,
+  English dates/numbers, and a CSP-safe translation layer. The choice is stored
+  in the browser.
+- Added a dedicated **Logs** page and a persistent SQLite log store. Logs are
+  split into panel, scheduler, monitor, Xray, Cloudflare, notifications, agent,
+  security and API categories, with level/search filters and automatic refresh.
+  `pulse logs` can read the same database with category/level/follow filters.
+- Unified the panel and agent CLI: `start`, `stop`, `restart`, `status`, `logs`,
+  `update`, `uninstall` (aliases `remove`/`delete`), `version`, and
+  `pulse port` for changing the panel listen port.
+- Added `--port` and `PULSE_PORT` to the panel binary, plus `--behind-proxy` in
+  the installer for nodes that already run Xray/VPN panels and a reverse proxy.
+- Isolated Xray completely: the installer keeps a Pulse-owned copy at
+  `/usr/local/lib/pulse/xray` and never overwrites `/usr/local/bin/xray` or
+  restarts an existing Xray service. Temporary test cores use a random loopback
+  port and their own working directory, and only their own process is stopped.
+- Made mobile modals lighter and safer: shorter sheet animation, no heavy
+  shadow/blur, scroll containment, and no backdrop-click close on phones.
+- Added store/CLI tests for application logs and port rewriting.
+
 ## 1.5.0
 
 - Agents now keep a persistent bidirectional link: gRPC first, WebSocket as a

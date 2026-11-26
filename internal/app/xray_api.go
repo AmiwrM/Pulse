@@ -20,6 +20,7 @@ func (a *App) handleXrayDetect(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	status := a.xray.Detect(ctx)
+	a.logFor("xray").Info("xray detection", "available", status.Available, "version", status.Version, "path", status.Path, "error", status.Error)
 	a.hub.broadcast("xray.status", status)
 	writeData(w, map[string]any{
 		"status":   status,

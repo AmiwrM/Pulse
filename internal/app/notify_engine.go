@@ -329,6 +329,11 @@ func (a *App) buildMessage(ev notifyEvent, conf *config.Settings) (title, plain,
 
 func (a *App) logNotification(n *model.NotificationLog) {
 	_ = a.db.InsertNotification(n)
+	if n.OK {
+		a.logFor("notify").Info("notification sent", "channel", n.Channel, "event", n.Event, "rule", n.RuleName)
+	} else {
+		a.logFor("notify").Warn("notification failed", "channel", n.Channel, "event", n.Event, "rule", n.RuleName, "error", n.Error)
+	}
 }
 
 func monitorTypeLabel(t string) string {

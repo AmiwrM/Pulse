@@ -37,7 +37,7 @@ func (a *App) scheduler(ctx context.Context) {
 func (a *App) tickMonitors() {
 	monitors, err := a.db.ListEnabledMonitors()
 	if err != nil {
-		a.logger.Error("list monitors", "error", err)
+		a.logFor("scheduler").Error("list monitors", "error", err)
 		return
 	}
 	now := nowUnix()
@@ -140,8 +140,23 @@ func (a *App) checkOne(ctx context.Context, m model.Monitor) {
 		LatencyMS: res.LatencyMS, StatusCode: res.StatusCode, Error: res.Error, Meta: metaRaw,
 	}
 	if err := a.db.CommitCheck(&m, &check, openIncident, closeIncident); err != nil {
-		a.logger.Error("commit check", "monitor", m.ID, "error", err)
+		a.logFor("monitor").Error("commit check", "monitor", m.ID, "error", err)
 		return
+	}
+	if openIncident {
+		a.logFor("monitor").Warn("monitor down", "monitor", m.Name, "target", m.Target, "error", res.Error, "latency_ms", res.LatencyMS)
+		if m.Type == "proxy" {
+			a.logFor("xray").Warn("proxy check failed", "monitor", m.Name)
+		}
+	}
+	if closeIncident {
+		a.logFor("monitor").Info("monitor recovered", "monitor", m.Name, "downtime_sec", downSec)
+		if m.Type == "proxy" {
+			a.logFor("xray").Info("proxy check recovered", "monitor", m.Name)
+		}
+	}
+	if res.OK && res.Warn != "" && before != "degraded" {
+		a.logFor("monitor").Warn("monitor warning", "monitor", m.Name, "warn", res.Warn)
 	}
 
 	a.hub.broadcast("check", map[string]any{
@@ -207,9 +222,10 @@ func (a *App) recordProbeFailure(m model.Monitor, res checker.Result, now int64)
 		Error: res.Error, Meta: metaRaw,
 	}
 	if err := a.db.CommitCheck(&m, &check, false, false); err != nil {
-		a.logger.Error("commit probe failure", "monitor", m.ID, "error", err)
+		a.logFor("monitor").Error("commit probe failure", "monitor", m.ID, "error", err)
 		return
 	}
+	a.logFor("monitor").Warn("probe agent unavailable", "monitor", m.Name, "error", res.Error)
 	a.hub.broadcast("check", map[string]any{
 		"monitor_id": m.ID, "status": m.Status, "ok": false,
 		"latency_ms": 0, "error": res.Error, "at": now, "probe_failed": true,
@@ -259,6 +275,8 @@ func (a *App) tickAgents() {
 func (a *App) runCleanup() {
 	conf := a.config()
 	a.db.Cleanup(conf.CheckRetentionDays, conf.MetricsRetentionDays)
+	// Keep the dedicated logs page useful without letting it grow forever.
+	a.db.CleanupLogs(nowUnix()-14*86400, 20000)
 }
 
 func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
@@ -300,6 +318,7 @@ func (a *App) applyAgentReport(agentID int64, report model.AgentReport, transpor
 		report.Hostname = ag.Name
 	}
 	if err := a.db.RecordAgentReport(agentID, report); err != nil {
+		a.logFor("agent").Error("store agent report", "agent", agentID, "error", err)
 		return err
 	}
 	if transport == "" {

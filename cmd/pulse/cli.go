@@ -8,13 +8,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
+
+	"pulse/internal/model"
+	"pulse/internal/store"
 )
 
 const updateRepository = "AmiwrM/Pulse"
@@ -41,20 +48,36 @@ func managementHelp(agent bool) string {
 	if agent {
 		command = "pulse-agent"
 	}
-	return fmt.Sprintf(`%s service commands:
+	extra := "  " + command + " port [PORT]      show or change the panel listen port\n"
+	if agent {
+		extra = ""
+	}
+	return fmt.Sprintf(`%s management commands:
 
+  %s start             start the service
+  %s stop              stop the service
   %s restart           restart the service
   %s status            show service status
-  %s logs              show the last service logs
-  %s update            update the binary from the latest GitHub release
-  %s update --agent    update and restart the agent service
-
+  %s logs [options]    show logs (category/level/follow/journal)
+  %s update [options]  update the binary from the latest GitHub release
+  %s uninstall         remove the service (alias: remove, delete)
+%s
 Options:
   --agent               target %s instead of %s
   --release TAG         update to a specific release (default: latest)
-  --no-restart          update the binary without restarting the service
-`, command, command, command, command, command, command,
-		serviceTargetFor(true).label, serviceTargetFor(false).label)
+  --no-restart          update/port change without restarting the service
+  --purge               uninstall also removes data/config (with --yes)
+  --yes                 do not ask for confirmation
+  --lines N             logs: number of entries (default: 120)
+  --follow              logs: keep following
+  --category NAME       logs: panel, monitor, xray, cloudflare, notify, agent, security, api
+  --level LEVEL         logs: debug, info, warn, error
+  --q TEXT              logs: search message/detail text
+  --since TIME          logs/journal: journalctl since value
+  --journal             logs: read journalctl instead of the app log database
+  --db PATH             logs: app database path
+`, command, command, command, command, command, command, command, command,
+		extra, serviceTargetFor(true).label, serviceTargetFor(false).label)
 }
 
 // handleManagementCLI handles the small operational commands before the main
@@ -81,14 +104,21 @@ func handleManagementCLI(args []string) bool {
 		return true
 	}
 	switch command {
-	case "restart":
-		return handleRestart(rest[1:], agentTarget)
+	case "start", "stop", "restart":
+		return handleServiceAction(command, rest[1:], agentTarget)
 	case "status":
 		return handleServiceStatus(rest[1:], agentTarget)
 	case "logs":
 		return handleServiceLogs(rest[1:], agentTarget)
 	case "update":
 		return handleUpdate(rest[1:], agentTarget)
+	case "uninstall", "remove", "delete":
+		return handleUninstall(rest[1:], agentTarget)
+	case "port":
+		return handlePort(rest[1:], agentTarget)
+	case "version", "--version", "-v":
+		fmt.Printf("%s %s\n", strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe"), version)
+		return true
 	default:
 		if appletAgent {
 			fmt.Fprintf(os.Stderr, "Unknown agent command: %s\n\n%s", rest[0], managementHelp(true))
@@ -111,8 +141,8 @@ func parseCommandFlags(fs *flag.FlagSet, args []string) (bool, error) {
 	return true, nil
 }
 
-func handleRestart(args []string, defaultAgent bool) bool {
-	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
+func handleServiceAction(action string, args []string, defaultAgent bool) bool {
+	fs := flag.NewFlagSet(action, flag.ContinueOnError)
 	var agent bool
 	agentFlag(fs, &agent, defaultAgent)
 	fs.Usage = func() { fmt.Print(managementHelp(agent)) }
@@ -126,10 +156,11 @@ func handleRestart(args []string, defaultAgent bool) bool {
 	if err := requireRoot(); err != nil {
 		cliExit(err)
 	}
-	if err := runSystemctl("restart", target.unit); err != nil {
-		cliExit(fmt.Errorf("restart failed: %w", err))
+	if err := runSystemctl(action, target.unit); err != nil {
+		cliExit(fmt.Errorf("%s failed: %w", action, err))
 	}
-	fmt.Printf("%s restarted (%s).\n", target.label, target.unit)
+	past := map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[action]
+	fmt.Printf("%s %s (%s).\n", target.label, past, target.unit)
 	return true
 }
 
@@ -156,8 +187,18 @@ func handleServiceStatus(args []string, defaultAgent bool) bool {
 
 func handleServiceLogs(args []string, defaultAgent bool) bool {
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
-	var agent bool
+	var agent, journal, follow bool
+	var lines int
+	var since, category, level, query, dbPath string
 	agentFlag(fs, &agent, defaultAgent)
+	fs.BoolVar(&journal, "journal", false, "read journalctl instead of the app database")
+	fs.BoolVar(&follow, "follow", false, "follow new entries")
+	fs.IntVar(&lines, "lines", 120, "number of entries")
+	fs.StringVar(&since, "since", "", "journalctl since value")
+	fs.StringVar(&category, "category", "", "log category")
+	fs.StringVar(&level, "level", "", "log level")
+	fs.StringVar(&query, "q", "", "search text")
+	fs.StringVar(&dbPath, "db", "", "app database path")
 	fs.Usage = func() { fmt.Print(managementHelp(agent)) }
 	if ok, err := parseCommandFlags(fs, args); !ok {
 		if errors.Is(err, flag.ErrHelp) {
@@ -165,14 +206,115 @@ func handleServiceLogs(args []string, defaultAgent bool) bool {
 		}
 		return true
 	}
+	if lines <= 0 {
+		lines = 120
+	}
+	if lines > 5000 {
+		lines = 5000
+	}
 	target := serviceTargetFor(agent)
-	cmd := exec.Command("journalctl", "-u", target.unit, "-n", "120", "--no-pager")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// The agent has no application database; its journal is the dedicated log.
+	if agent || journal {
+		cmdArgs := []string{"-u", target.unit, "-n", strconv.Itoa(lines), "--no-pager"}
+		if since != "" {
+			cmdArgs = append(cmdArgs, "--since", since)
+		}
+		if follow {
+			cmdArgs = append(cmdArgs, "-f")
+		}
+		cmd := exec.Command("journalctl", cmdArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
 		return true
 	}
-	return true
+
+	path := strings.TrimSpace(dbPath)
+	if path == "" {
+		path = strings.TrimSpace(os.Getenv("PULSE_DB_PATH"))
+	}
+	if path == "" {
+		if _, err := os.Stat("/var/lib/pulse/pulse.db"); err == nil {
+			path = "/var/lib/pulse/pulse.db"
+		} else {
+			path = "./data/pulse.db"
+		}
+	}
+	if _, err := os.Stat(path); err != nil {
+		fmt.Fprintf(os.Stderr, "App log database not found at %s; falling back to journalctl.\n", path)
+		cmd := exec.Command("journalctl", "-u", target.unit, "-n", strconv.Itoa(lines), "--no-pager")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+		return true
+	}
+	db, err := store.Open(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not open %s: %v; falling back to journalctl.\n", path, err)
+		cmd := exec.Command("journalctl", "-u", target.unit, "-n", strconv.Itoa(lines), "--no-pager")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+		return true
+	}
+	defer db.Close()
+
+	filter := store.LogFilter{Category: category, Level: level, Query: query, Limit: lines}
+	entries, err := db.ListLogs(filter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not read app logs: %v\n", err)
+		return true
+	}
+	var lastID int64
+	printed := 0
+	for i := len(entries) - 1; i >= 0; i-- {
+		printAppLog(entries[i])
+		if entries[i].ID > lastID {
+			lastID = entries[i].ID
+		}
+		printed++
+	}
+	if !follow {
+		if printed == 0 {
+			fmt.Println("No log entries.")
+		}
+		return true
+	}
+
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	defer signal.Stop(interrupt)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-interrupt:
+			return true
+		case <-ticker.C:
+			filter.AfterID = lastID
+			filter.Limit = 200
+			fresh, err := db.ListLogs(filter)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Could not read app logs: %v\n", err)
+				continue
+			}
+			for i := len(fresh) - 1; i >= 0; i-- {
+				printAppLog(fresh[i])
+				if fresh[i].ID > lastID {
+					lastID = fresh[i].ID
+				}
+			}
+		}
+	}
+}
+
+func printAppLog(entry model.LogEntry) {
+	at := time.Unix(entry.At, 0).Format("2006-01-02 15:04:05")
+	line := fmt.Sprintf("%s  %-5s  %-10s  %s", at, strings.ToUpper(entry.Level), entry.Category, entry.Message)
+	if strings.TrimSpace(entry.Detail) != "" {
+		line += "  " + entry.Detail
+	}
+	fmt.Println(line)
 }
 
 func handleUpdate(args []string, defaultAgent bool) bool {
@@ -214,6 +356,245 @@ func handleUpdate(args []string, defaultAgent bool) bool {
 	}
 	fmt.Printf("%s restarted (%s).\n", target.label, target.unit)
 	return true
+}
+
+func handleUninstall(args []string, defaultAgent bool) bool {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	var agent, yes, purge bool
+	agentFlag(fs, &agent, defaultAgent)
+	fs.BoolVar(&yes, "yes", false, "do not ask for confirmation")
+	fs.BoolVar(&purge, "purge", false, "also remove data and configuration")
+	fs.Usage = func() { fmt.Print(managementHelp(agent)) }
+	if ok, err := parseCommandFlags(fs, args); !ok {
+		if errors.Is(err, flag.ErrHelp) {
+			return true
+		}
+		return true
+	}
+	target := serviceTargetFor(agent)
+	if err := requireRoot(); err != nil {
+		cliExit(err)
+	}
+	if !yes && !confirmDestructive(fmt.Sprintf("Remove %s (%s)?", target.label, target.unit)) {
+		fmt.Println("Aborted.")
+		return true
+	}
+	_ = runSystemctl("stop", target.unit)
+	_ = runSystemctl("disable", target.unit)
+	unitPath := "/etc/systemd/system/" + target.unit + ".service"
+	if err := os.Remove(unitPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "remove %s: %v\n", unitPath, err)
+	}
+	if agent {
+		_ = os.Remove("/usr/local/bin/pulse-agent")
+		_ = os.Remove("/usr/local/bin/pulse-a")
+		_ = os.Remove("/etc/pulse/agent.env")
+		if purge && !fileExists("/etc/pulse/pulse.env") {
+			_ = os.RemoveAll("/usr/local/lib/pulse")
+		}
+	} else {
+		if purge {
+			_ = os.Remove("/etc/caddy/conf.d/pulse.caddy")
+			_ = os.Remove("/etc/pulse/pulse.env")
+			_ = os.RemoveAll("/var/lib/pulse")
+			if !fileExists("/etc/systemd/system/pulse-agent.service") {
+				_ = os.RemoveAll("/usr/local/lib/pulse")
+			}
+			reloadCaddy()
+		}
+	}
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	fmt.Printf("%s service removed. The binary at /usr/local/bin/pulse was kept.\n", target.label)
+	if purge {
+		fmt.Println("Data and configuration were removed (--purge).")
+	} else {
+		fmt.Println("Your data and configuration were kept. Use --purge to remove them.")
+	}
+	return true
+}
+
+func confirmDestructive(prompt string) bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		fmt.Fprintln(os.Stderr, "Non-interactive input; use --yes to confirm.")
+		return false
+	}
+	fmt.Printf("%s Type 'yes' to continue: ", prompt)
+	var answer string
+	_, _ = fmt.Fscanln(os.Stdin, &answer)
+	return strings.EqualFold(strings.TrimSpace(answer), "yes")
+}
+
+func handlePort(args []string, defaultAgent bool) bool {
+	fs := flag.NewFlagSet("port", flag.ContinueOnError)
+	var agent, noRestart, caddy, dryRun bool
+	agentFlag(fs, &agent, defaultAgent)
+	fs.BoolVar(&noRestart, "no-restart", false, "do not restart the service")
+	fs.BoolVar(&caddy, "caddy", true, "update the Pulse Caddy site if present")
+	fs.BoolVar(&dryRun, "dry-run", false, "print changes without writing")
+	fs.Usage = func() { fmt.Print(managementHelp(agent)) }
+	if ok, err := parseCommandFlags(fs, args); !ok {
+		if errors.Is(err, flag.ErrHelp) {
+			return true
+		}
+		return true
+	}
+	if agent {
+		fmt.Println("The agent has no listening port; it connects outbound to the panel URL.")
+		return true
+	}
+	unitPath := "/etc/systemd/system/pulse.service"
+	unit, err := os.ReadFile(unitPath)
+	if err != nil {
+		cliExit(fmt.Errorf("cannot read %s: %w (change the port with the installer: --port)", unitPath, err))
+	}
+	currentAddr := unitAddr(string(unit))
+	currentPort := addrPort(currentAddr)
+	if len(fs.Args()) == 0 {
+		fmt.Printf("Panel listen address: %s (port %s)\n", currentAddr, currentPort)
+		return true
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(fs.Args()[0]))
+	if err != nil || port < 1 || port > 65535 {
+		cliExit(errors.New("invalid port: use a number between 1 and 65535"))
+	}
+	if port < 1024 {
+		fmt.Fprintln(os.Stderr, "Warning: ports below 1024 normally require root.")
+	}
+	if err := requireRoot(); err != nil {
+		cliExit(err)
+	}
+	newAddr := withPort(currentAddr, port)
+	newUnit := rewriteUnitAddr(string(unit), newAddr)
+	caddyPath := "/etc/caddy/conf.d/pulse.caddy"
+	var oldCaddy, newCaddy string
+	if caddy {
+		if raw, err := os.ReadFile(caddyPath); err == nil {
+			oldCaddy = string(raw)
+			newCaddy = rewriteCaddyPort(oldCaddy, currentPort, strconv.Itoa(port))
+		}
+	}
+	envPath := "/etc/pulse/pulse.env"
+	var oldEnv, newEnv string
+	if raw, err := os.ReadFile(envPath); err == nil {
+		oldEnv = string(raw)
+		newEnv = rewritePublicPort(oldEnv, currentPort, strconv.Itoa(port))
+	}
+	if dryRun {
+		fmt.Printf("Would set listen address: %s\n", newAddr)
+		if oldCaddy != "" && newCaddy != oldCaddy {
+			fmt.Printf("Would update %s\n", caddyPath)
+		}
+		return true
+	}
+	if err := backupAndWrite(unitPath, []byte(newUnit), 0644); err != nil {
+		cliExit(err)
+	}
+	caddyChanged := false
+	if oldCaddy != "" && newCaddy != oldCaddy {
+		if err := backupAndWrite(caddyPath, []byte(newCaddy), 0644); err != nil {
+			cliExit(err)
+		}
+		caddyChanged = true
+	}
+	if oldEnv != "" && newEnv != oldEnv {
+		_ = backupAndWrite(envPath, []byte(newEnv), 0600)
+	}
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	if !noRestart {
+		if err := runSystemctl("restart", "pulse"); err != nil {
+			fmt.Fprintf(os.Stderr, "Port updated, but restart failed: %v\n", err)
+		}
+		if caddyChanged {
+			reloadCaddy()
+		}
+	}
+	fmt.Printf("Panel port changed from %s to %d (listen %s).\n", currentPort, port, newAddr)
+	fmt.Printf("Check: journalctl -u pulse -n 40 --no-pager\n")
+	return true
+}
+
+func reloadCaddy() {
+	if err := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile").Run(); err != nil {
+		_ = exec.Command("systemctl", "reload", "caddy").Run()
+	}
+}
+
+func backupAndWrite(path string, data []byte, mode os.FileMode) error {
+	backup := path + ".bak-" + time.Now().Format("20060102-150405")
+	if old, err := os.ReadFile(path); err == nil {
+		_ = os.WriteFile(backup, old, mode)
+	}
+	return os.WriteFile(path, data, mode)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+var unitAddrRE = regexp.MustCompile(`--addr\s+(\S+)`)
+
+func unitAddr(unit string) string {
+	if m := unitAddrRE.FindStringSubmatch(unit); len(m) == 2 {
+		return strings.Trim(m[1], `"'`)
+	}
+	return ":8080"
+}
+
+func addrPort(addr string) string {
+	if addr == "" {
+		return ""
+	}
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return addr[i+1:]
+	}
+	return ""
+}
+
+func withPort(addr string, port int) string {
+	host := ""
+	if addr != "" {
+		if h, _, err := net.SplitHostPort(addr); err == nil {
+			host = h
+		} else {
+			host = strings.Trim(addr, "[]")
+		}
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func rewriteUnitAddr(unit, addr string) string {
+	if unitAddrRE.MatchString(unit) {
+		return unitAddrRE.ReplaceAllString(unit, "--addr "+addr)
+	}
+	re := regexp.MustCompile(`(?m)^(ExecStart=.*)$`)
+	return re.ReplaceAllString(unit, `${1} --addr `+addr)
+}
+
+func rewriteCaddyPort(content, oldPort, newPort string) string {
+	if oldPort == "" || oldPort == newPort {
+		return content
+	}
+	out := strings.ReplaceAll(content, "127.0.0.1:"+oldPort, "127.0.0.1:"+newPort)
+	out = strings.ReplaceAll(out, "localhost:"+oldPort, "localhost:"+newPort)
+	return out
+}
+
+func rewritePublicPort(env, oldPort, newPort string) string {
+	if oldPort == "" || oldPort == newPort {
+		return env
+	}
+	lines := strings.Split(env, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "PULSE_PUBLIC_BASE_URL=") || strings.HasPrefix(line, "PULSE_ADDR=") {
+			lines[i] = strings.ReplaceAll(line, ":"+oldPort, ":"+newPort)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func requireRoot() error {
