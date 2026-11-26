@@ -12,7 +12,7 @@ import (
 
 func nowUnix() int64 { return time.Now().Unix() }
 
-const monitorColumns = `id,name,type,target,group_name,interval_sec,timeout_ms,enabled,config,
+const monitorColumns = `id,name,type,target,group_name,interval_sec,timeout_ms,enabled,config,probe_agent_id,
 status,last_checked_at,last_latency_ms,last_error,last_status_code,ssl_expires_at,
 consecutive_fails,consecutive_oks,down_since,last_notified_at,fail_threshold,recover_threshold,
 cf_enabled,cf_zone_id,cf_record_id,cf_record_name,cf_primary,cf_failover,cf_last_action,cf_last_action_at,
@@ -27,7 +27,7 @@ func scanMonitor(sc rowScanner) (model.Monitor, error) {
 	var enabled, cfEnabled int
 	var cfg string
 	err := sc.Scan(
-		&m.ID, &m.Name, &m.Type, &m.Target, &m.Group, &m.Interval, &m.Timeout, &enabled, &cfg,
+		&m.ID, &m.Name, &m.Type, &m.Target, &m.Group, &m.Interval, &m.Timeout, &enabled, &cfg, &m.ProbeAgentID,
 		&m.Status, &m.LastCheckedAt, &m.LastLatencyMS, &m.LastError, &m.LastStatusCode, &m.SSLExpiresAt,
 		&m.ConsecutiveFails, &m.ConsecutiveOks, &m.DownSince, &m.LastNotifiedAt, &m.FailThreshold, &m.RecoverThreshold,
 		&cfEnabled, &m.CFZoneID, &m.CFRecordID, &m.CFRecordName, &m.CFPrimary, &m.CFFailover, &m.CFLastAction, &m.CFLastActionAt,
@@ -102,12 +102,12 @@ func (s *Store) CreateMonitor(m *model.Monitor) error {
 		m.Config = json.RawMessage(`{}`)
 	}
 	res, err := s.db.Exec(`INSERT INTO monitors(
-		name,type,target,group_name,interval_sec,timeout_ms,enabled,config,status,
+		name,type,target,group_name,interval_sec,timeout_ms,enabled,config,probe_agent_id,status,
 		last_checked_at,last_latency_ms,last_error,last_status_code,ssl_expires_at,
 		consecutive_fails,consecutive_oks,down_since,last_notified_at,fail_threshold,recover_threshold,
 		cf_enabled,cf_zone_id,cf_record_id,cf_record_name,cf_primary,cf_failover,cf_last_action,cf_last_action_at,
-		created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		m.Name, m.Type, m.Target, m.Group, m.Interval, m.Timeout, boolInt(m.Enabled), string(m.Config), "unknown",
+		created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		m.Name, m.Type, m.Target, m.Group, m.Interval, m.Timeout, boolInt(m.Enabled), string(m.Config), m.ProbeAgentID, "unknown",
 		0, 0, "", 0, 0, 0, 0, 0, 0, m.FailThreshold, m.RecoverThreshold,
 		boolInt(m.CFEnabled), m.CFZoneID, m.CFRecordID, m.CFRecordName, m.CFPrimary, m.CFFailover, "", 0,
 		m.CreatedAt, m.UpdatedAt)
@@ -126,10 +126,10 @@ func (s *Store) UpdateMonitor(m *model.Monitor) error {
 		m.Config = json.RawMessage(`{}`)
 	}
 	_, err := s.db.Exec(`UPDATE monitors SET
-		name=?,type=?,target=?,group_name=?,interval_sec=?,timeout_ms=?,enabled=?,config=?,
+		name=?,type=?,target=?,group_name=?,interval_sec=?,timeout_ms=?,enabled=?,config=?,probe_agent_id=?,
 		fail_threshold=?,recover_threshold=?,cf_enabled=?,cf_zone_id=?,cf_record_id=?,cf_record_name=?,
 		cf_primary=?,cf_failover=?,updated_at=? WHERE id=?`,
-		m.Name, m.Type, m.Target, m.Group, m.Interval, m.Timeout, boolInt(m.Enabled), string(m.Config),
+		m.Name, m.Type, m.Target, m.Group, m.Interval, m.Timeout, boolInt(m.Enabled), string(m.Config), m.ProbeAgentID,
 		m.FailThreshold, m.RecoverThreshold, boolInt(m.CFEnabled), m.CFZoneID, m.CFRecordID, m.CFRecordName,
 		m.CFPrimary, m.CFFailover, now, m.ID)
 	if err != nil {

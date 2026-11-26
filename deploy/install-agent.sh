@@ -13,17 +13,19 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.4.4      Release tag (default: latest)
+#   --release v1.5.0      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
 #   --no-wg               Disable WireGuard collection
+#   --xray-version VER    Xray release for remote proxy checks (default: v26.11.9)
+#   --no-xray             Do not install Xray on this agent
 #
 # Run as root on Debian/Ubuntu.
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.4.4"
+INSTALLER_VERSION="1.5.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 
@@ -36,6 +38,13 @@ RELEASE="${PULSE_VERSION:-latest}"
 SERVICES=""
 WG=1
 AGENT_INTERVAL="1s"
+INSTALL_XRAY=1
+FORCE_XRAY=0
+XRAY_VERSION="${XRAY_VERSION:-v26.11.9}"
+XRAY_DOWNLOAD_URL="${XRAY_DOWNLOAD_URL:-}"
+XRAY_OK=0
+XRAY_PATH=""
+XRAY_ASSET=""
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -58,6 +67,9 @@ Options:
   --services LIST       Comma-separated systemd services (e.g. xray,wireguard)
   --no-wg               Disable WireGuard collection
   --interval DURATION   Report interval (default: 1s)
+  --xray-version VER    Xray release for remote proxy checks (default: v26.11.9)
+  --no-xray             Do not install Xray on this agent
+  --force-xray          Reinstall Xray even if it is already installed
   -h, --help            Show this help
 HELP
   exit 0
@@ -74,6 +86,9 @@ while [[ $# -gt 0 ]]; do
     --services) SERVICES="$2"; shift 2 ;;
     --no-wg) WG=0; shift ;;
     --interval) AGENT_INTERVAL="$2"; shift 2 ;;
+    --xray-version) XRAY_VERSION="$2"; FORCE_XRAY=1; shift 2 ;;
+    --no-xray) INSTALL_XRAY=0; shift ;;
+    --force-xray) FORCE_XRAY=1; shift ;;
     -h|--help) usage ;;
     *) die "Unknown option: $1 (try --help)" ;;
   esac
@@ -87,13 +102,19 @@ SERVER="${SERVER%/}"
 [[ -n "$NAME" && ${#NAME} -le 80 && "$NAME" != *$'\n'* && "$NAME" != *$'\r'* ]] || die "Invalid --name."
 [[ "$AGENT_INTERVAL" =~ ^[0-9]+(s|m|h)$ ]] || die "Invalid --interval (e.g. 1s, 1m)."
 [[ "$RELEASE" == "latest" || "$RELEASE" == v* ]] || RELEASE="v$RELEASE"
+[[ "$XRAY_VERSION" == "latest" || "$XRAY_VERSION" == v* ]] || XRAY_VERSION="v$XRAY_VERSION"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64|amd64)  ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
+  x86_64|amd64)  ARCH="amd64"; XRAY_ASSET="Xray-linux-64.zip" ;;
+  aarch64|arm64) ARCH="arm64"; XRAY_ASSET="Xray-linux-arm64-v8a.zip" ;;
   *) die "Unsupported architecture: $ARCH (amd64/arm64 only)" ;;
 esac
+
+command -v apt-get >/dev/null 2>&1 || die "This installer supports Debian/Ubuntu (apt-get not found)."
+log "Installing system dependencies..."
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl unzip tar gzip coreutils iputils-ping >/dev/null
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -143,6 +164,49 @@ ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
 ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
 install -d -m 0750 /etc/pulse
 
+install_xray() {
+  if [[ "$INSTALL_XRAY" -eq 0 ]]; then
+    if command -v xray >/dev/null 2>&1; then
+      XRAY_PATH="$(command -v xray)"
+      "$XRAY_PATH" version >/dev/null 2>&1 && XRAY_OK=1
+    fi
+    return 0
+  fi
+  if [[ "$FORCE_XRAY" -eq 0 ]] && command -v xray >/dev/null 2>&1; then
+    XRAY_PATH="$(command -v xray)"
+    if "$XRAY_PATH" version >/dev/null 2>&1; then
+      XRAY_OK=1
+      log "Keeping existing Xray: $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
+      return 0
+    fi
+  fi
+  local url
+  if [[ "$XRAY_VERSION" == "latest" ]]; then
+    url="${XRAY_DOWNLOAD_URL:-https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}}"
+  else
+    url="${XRAY_DOWNLOAD_URL:-https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ASSET}}"
+  fi
+  log "Installing Xray ${XRAY_VERSION} from the official release..."
+  if ! curl -fsSL --retry 4 --retry-delay 2 "$url" -o "$TMP/xray.zip"; then
+    warn "Could not download Xray. The agent will still report hardware metrics, but proxy handshakes from this server will be skipped."
+    return 0
+  fi
+  if ! unzip -q "$TMP/xray.zip" xray -d "$TMP" 2>/dev/null; then
+    unzip -q "$TMP/xray.zip" -d "$TMP" || return 0
+  fi
+  [[ -f "$TMP/xray" ]] || { warn "Xray archive did not contain the xray binary."; return 0; }
+  install -m 0755 "$TMP/xray" /usr/local/bin/xray
+  XRAY_PATH="/usr/local/bin/xray"
+  if "$XRAY_PATH" version >/dev/null 2>&1; then
+    XRAY_OK=1
+    log "Installed Xray: $("$XRAY_PATH" version 2>/dev/null | sed -n '1p')"
+  else
+    warn "The Xray binary is not runnable on this server."
+    XRAY_PATH=""
+  fi
+}
+install_xray
+
 env_escape() {
   local s="$1"
   s="${s//\\/\\\\}"
@@ -159,6 +223,9 @@ umask 077
   printf 'PULSE_AGENT_NAME="%s"\n' "$(env_escape "$NAME")"
   if [[ -n "$SERVICES" ]]; then
     printf 'PULSE_AGENT_SERVICES="%s"\n' "$(env_escape "$SERVICES")"
+  fi
+  if [[ "$XRAY_OK" -eq 1 && -n "$XRAY_PATH" ]]; then
+    printf 'PULSE_XRAY_BIN="%s"\n' "$(env_escape "$XRAY_PATH")"
   fi
 } >/etc/pulse/agent.env
 chmod 0600 /etc/pulse/agent.env
@@ -218,6 +285,7 @@ echo "============================================================"
 echo " Version : ${VERSION_OUT#pulse }"
 echo " Server  : $SERVER"
 echo " Name    : $NAME"
+echo " Xray    : ${XRAY_PATH:-not installed (proxy handshakes disabled)}"
 echo " Config  : /etc/pulse/agent.env (mode 600)"
 echo " Service : systemctl status pulse-agent --no-pager"
 echo " Logs    : journalctl -u pulse-agent -f"

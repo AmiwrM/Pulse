@@ -58,6 +58,43 @@ func TestMigrateAndSeed(t *testing.T) {
 	}
 }
 
+func TestMonitorProbeAgentAndDelete(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ag, _, err := db.CreateAgent("iran-probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &model.Monitor{
+		Name: "probe target", Type: "tcp", Target: "127.0.0.1:80", Enabled: true,
+		Interval: 60, Timeout: 3000, ProbeAgentID: ag.ID,
+		Config: []byte(`{}`), FailThreshold: 2, RecoverThreshold: 1,
+	}
+	if err := db.CreateMonitor(m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetMonitor(m.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get monitor: %v", err)
+	}
+	if got.ProbeAgentID != ag.ID {
+		t.Fatalf("probe agent was not persisted: got %d want %d", got.ProbeAgentID, ag.ID)
+	}
+	if err := db.DeleteAgent(ag.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.GetMonitor(m.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get monitor after delete: %v", err)
+	}
+	if got.ProbeAgentID != 0 {
+		t.Fatalf("deleting an agent must clear its monitors, got %d", got.ProbeAgentID)
+	}
+}
+
 func TestUsersAndPushSubs(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
 	if err != nil {

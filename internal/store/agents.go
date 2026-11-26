@@ -120,9 +120,29 @@ func (s *Store) GetAgentByToken(token string) (*model.Agent, error) {
 	return &a, nil
 }
 
-func (s *Store) DeleteAgent(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM agents WHERE id=?`, id)
+func (s *Store) TouchAgent(id int64, at int64) error {
+	if at <= 0 {
+		at = nowUnix()
+	}
+	_, err := s.db.Exec(`UPDATE agents SET last_seen=?, offline_notified=0 WHERE id=?`, at, id)
 	return err
+}
+
+func (s *Store) DeleteAgent(id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// A monitor must never keep pointing at a deleted probe. Falling back to
+	// the panel is safer than silently running the check somewhere unintended.
+	if _, err := tx.Exec(`UPDATE monitors SET probe_agent_id=0, updated_at=? WHERE probe_agent_id=?`, nowUnix(), id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agents WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UpdateAgentMeta(id int64, name, notes string) error {

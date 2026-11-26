@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS monitors (
 	timeout_ms INTEGER NOT NULL DEFAULT 12000,
 	enabled INTEGER NOT NULL DEFAULT 1,
 	config TEXT NOT NULL DEFAULT '{}',
+	probe_agent_id INTEGER NOT NULL DEFAULT 0,
 	status TEXT NOT NULL DEFAULT 'unknown',
 	last_checked_at INTEGER NOT NULL DEFAULT 0,
 	last_latency_ms INTEGER NOT NULL DEFAULT 0,
@@ -226,10 +227,14 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	// Lightweight upgrade for databases created before agent offline de-duplication.
+	// Lightweight upgrades for databases created by older releases.
 	var hasOffline int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('agents') WHERE name='offline_notified'`).Scan(&hasOffline); err == nil && hasOffline == 0 {
 		_, _ = s.db.Exec(`ALTER TABLE agents ADD COLUMN offline_notified INTEGER NOT NULL DEFAULT 0`)
+	}
+	var hasProbeAgent int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('monitors') WHERE name='probe_agent_id'`).Scan(&hasProbeAgent); err == nil && hasProbeAgent == 0 {
+		_, _ = s.db.Exec(`ALTER TABLE monitors ADD COLUMN probe_agent_id INTEGER NOT NULL DEFAULT 0`)
 	}
 	now := nowUnix()
 	// Seed the default rule set exactly once. User-deleted rules must stay deleted.

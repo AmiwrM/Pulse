@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.5.0
+
+- Agents now keep a persistent bidirectional link: gRPC first, WebSocket as a
+  reverse-proxy fallback, and REST as the final fallback. Hardware telemetry is
+  pushed every second and the link state is reflected immediately in the UI.
+- Added **test from agent** for every monitor type. A monitor can select an
+  agent as its probe location, so proxy handshakes, TCP, ICMP, HTTP, DNS and
+  SSL checks run from that server's network instead of the panel host.
+- A missing or offline probe agent is reported as a degraded probe failure
+  instead of opening a false incident for the target.
+- Added `probe_agent_id` with an automatic database migration, agent-aware
+  monitor cards/details, and a probe selector in the monitor form.
+- Agents advertise check capability and Xray availability over the live link;
+  the UI shows gRPC/WebSocket/REST transport and warns when an agent cannot run
+  proxy handshakes.
+- The agent installer now installs the official Xray release by default for
+  remote proxy tests (`--no-xray` to skip it).
+- The Caddy installer exposes the gRPC path over h2c while keeping normal
+  UI/SSE traffic and the WebSocket fallback on HTTP/1.1.
+- Agent deletion clears monitors that referenced that probe; agent token
+  rotation drops the old live link immediately.
+- Added gRPC, WebSocket and remote-check integration tests.
+- Fixed the monitor form's type picker overflowing its modal at narrow tablet
+  widths (the grid items now shrink and wrap correctly).
+
 ## 1.4.4
 
 - Header is now full-bleed: page gutters moved from the main column to the

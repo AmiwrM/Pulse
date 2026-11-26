@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
+	"pulse/internal/checker"
 	"pulse/internal/model"
 )
 
@@ -51,9 +53,20 @@ func (a *App) tickMonitors() {
 	}
 }
 
+func (a *App) runMonitor(ctx context.Context, m model.Monitor) checker.Result {
+	if m.ProbeAgentID > 0 {
+		return a.runRemoteMonitor(ctx, m)
+	}
+	return a.probes.Run(ctx, m)
+}
+
 func (a *App) checkOne(ctx context.Context, m model.Monitor) {
-	res := a.probes.Run(ctx, m)
+	res := a.runMonitor(ctx, m)
 	now := time.Now().Unix()
+	if res.ProbeFailed {
+		a.recordProbeFailure(m, res, now)
+		return
+	}
 	before := m.Status
 	if m.FailThreshold <= 0 {
 		m.FailThreshold = 2
@@ -171,6 +184,38 @@ func (a *App) checkOne(ctx context.Context, m model.Monitor) {
 	}
 }
 
+// recordProbeFailure persists a check that could not run because its selected
+// agent is unavailable. It never opens an incident: a broken probe is not proof
+// that the target is down.
+func (a *App) recordProbeFailure(m model.Monitor, res checker.Result, now int64) {
+	if m.Status != "down" {
+		m.Status = "degraded"
+	}
+	m.LastCheckedAt = now
+	m.LastLatencyMS = 0
+	m.LastStatusCode = 0
+	m.LastError = res.Error
+	meta := res.Meta
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["probe_infra"] = true
+	meta["duration_ms"] = 0
+	metaRaw, _ := json.Marshal(meta)
+	check := model.Check{
+		MonitorID: m.ID, At: now, OK: false, Status: m.Status,
+		Error: res.Error, Meta: metaRaw,
+	}
+	if err := a.db.CommitCheck(&m, &check, false, false); err != nil {
+		a.logger.Error("commit probe failure", "monitor", m.ID, "error", err)
+		return
+	}
+	a.hub.broadcast("check", map[string]any{
+		"monitor_id": m.ID, "status": m.Status, "ok": false,
+		"latency_ms": 0, "error": res.Error, "at": now, "probe_failed": true,
+	})
+}
+
 func dnsMismatch(meta map[string]any) bool {
 	if meta == nil {
 		return false
@@ -180,6 +225,15 @@ func dnsMismatch(meta map[string]any) bool {
 }
 
 func (a *App) tickAgents() {
+	now := nowUnix()
+	// Reports arrive every second; a live link with no protocol message for
+	// 30 seconds is stale even if the TCP connection still looks open.
+	for _, sess := range a.links.stale(now - 30) {
+		if a.links.remove(sess) {
+			a.onAgentLinkDown(sess)
+			sess.shutdown(errors.New("agent link stopped sending telemetry"))
+		}
+	}
 	conf := a.config()
 	after := conf.AgentOfflineAfterSec
 	if after < 60 {
@@ -224,13 +278,37 @@ func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	report.IP = clientIP(r)
-	if report.Hostname == "" {
-		report.Hostname = ag.Name
-	}
-	if err := a.db.RecordAgentReport(ag.ID, report); err != nil {
+	if err := a.applyAgentReport(ag.ID, report, "REST"); err != nil {
 		a.logger.Error("agent report", "agent", ag.ID, "error", err)
 		writeErr(w, 500, "ذخیره گزارش ناموفق بود")
 		return
+	}
+	writeData(w, map[string]any{"ok": true, "server_time": nowUnix()})
+}
+
+// applyAgentReport is shared by the REST endpoint and the persistent link so
+// both transports produce identical database state, SSE updates and rules.
+func (a *App) applyAgentReport(agentID int64, report model.AgentReport, transport string) error {
+	ag, err := a.db.GetAgent(agentID)
+	if err != nil {
+		return err
+	}
+	if ag == nil {
+		return errors.New("agent not found")
+	}
+	if report.Hostname == "" {
+		report.Hostname = ag.Name
+	}
+	if err := a.db.RecordAgentReport(agentID, report); err != nil {
+		return err
+	}
+	if transport == "" {
+		transport = "REST"
+	}
+	if transport == "REST" {
+		a.presenceMu.Lock()
+		a.restSeen[agentID] = nowUnix()
+		a.presenceMu.Unlock()
 	}
 
 	ag.Hostname = report.Hostname
@@ -256,20 +334,22 @@ func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		"cpu": ag.CPUPct, "ram": ag.RAMPct, "disk": ag.DiskPct, "load1": ag.Load1,
 		"net_rx_bps": ag.NetRx, "net_tx_bps": ag.NetTx, "ram_total": ag.RAMTotal,
 		"disk_total": ag.DiskTotal, "version": ag.Version, "last_seen": ag.LastSeen,
+		"connected": true, "transport": transport,
 	})
-	// Threshold rules are evaluated on every report. The rule engine applies the
-	// per-rule threshold and cooldown, so lower thresholds than 80% still work.
-	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer notifyCancel()
+	// Rules can be slow (network sends); keep the live stream responsive.
+	go a.dispatchAgentThresholds(ag, report)
+	return nil
+}
+
+func (a *App) dispatchAgentThresholds(ag *model.Agent, report model.AgentReport) {
+	notifyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	for _, item := range []struct {
 		trigger string
 		value   float64
 	}{
 		{"cpu_high", report.CPUPct}, {"ram_high", report.RAMPct}, {"disk_high", report.DiskPct},
 	} {
-		v := item.value
-		copyAgent := ag
-		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: item.trigger, Agent: copyAgent, Value: v})
+		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: item.trigger, Agent: ag, Value: item.value})
 	}
-	writeData(w, map[string]any{"ok": true, "server_time": nowUnix()})
 }

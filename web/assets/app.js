@@ -1,7 +1,7 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=16';
+import { lineChart, sparkline } from './charts.js?v=17';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -460,7 +460,7 @@ function renderAuth(mode, message = '') {
         ${isSetup ? `<div class="field"><label for="auth-pass2">تکرار رمز عبور</label><input class="input" style="direction:ltr;text-align:left" id="auth-pass2" name="confirm" type="password" autocomplete="new-password" placeholder="••••••••" required></div>` : ''}
         <button class="btn btn-primary" type="submit">${isSetup ? 'ساخت حساب و شروع' : 'ورود به پالس'} ${icon('arrow')}</button>
       </form>
-      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.4.4')}</span><span>${icon('shield')} اتصال امن</span></div>
+      <div class="auth-foot"><span>پالس نسخه ${fa(state.auth?.version || '1.5.0')}</span><span>${icon('shield')} اتصال امن</span></div>
     </div>
   </div>`;
   if (isSetup) {
@@ -649,11 +649,37 @@ function handleSSE(msg) {
   if (type === 'toast') {
     toast(msg.data?.message || '', msg.data?.level || 'info');
   }
+  if (type === 'agent.link') {
+    const d = msg.data || {};
+    const a = state.agents.find((item) => Number(item.id) === Number(d.agent_id));
+    if (!a) {
+      if (state.view === 'servers' || state.view === 'dashboard') scheduleRefresh();
+      return;
+    }
+    a.connected = !!d.connected;
+    a.transport = d.transport || '';
+    if (d.protocol) a.protocol = d.protocol;
+    if (typeof d.can_check === 'boolean') a.can_check = d.can_check;
+    if (typeof d.xray_available === 'boolean') a.xray_available = d.xray_available;
+    if (d.xray_version !== undefined) a.xray_version = d.xray_version || '';
+    if (d.last_seen) a.last_seen = d.last_seen;
+    if (d.version) a.version = d.version;
+    if (d.hostname) a.hostname = d.hostname;
+    if (state.summary?.stats) state.summary.stats.agents_online = state.agents.filter(statusFromAgent).length;
+    const cardPatched = updateAgentCard(a);
+    updateMiniAgent(a);
+    updateAgentSummary();
+    if (state.modal?.kind === 'agent' && Number(state.modal?.agentId) === Number(a.id)) updateAgentDetailLive(a);
+    if (!cardPatched && (state.view === 'servers' || state.view === 'dashboard')) scheduleRefresh();
+    return;
+  }
   if (type === 'agent.offline') {
     const d = msg.data || {};
     const a = state.agents.find((item) => Number(item.id) === Number(d.agent_id));
     if (a) {
       if (d.last_seen) a.last_seen = d.last_seen;
+      a.connected = false;
+      a.transport = '';
       updateAgentCard(a);
       updateMiniAgent(a);
       updateAgentSummary();
@@ -678,6 +704,8 @@ function handleSSE(msg) {
       a.os = d.os || a.os;
       a.ip = d.ip || a.ip;
       a.last_seen = d.last_seen || a.last_seen;
+      if (typeof d.connected === 'boolean') a.connected = d.connected;
+      if (d.transport) a.transport = d.transport;
       if (state.summary?.stats) {
         state.summary.stats.agents_online = state.agents.filter(statusFromAgent).length;
       }
@@ -886,6 +914,7 @@ function gaugeColor(value) {
   return '#38bdf8';
 }
 function statusFromAgent(a) {
+  if (typeof a.connected === 'boolean') return a.connected;
   if (!a.last_seen) return false;
   return Date.now() / 1000 - a.last_seen <= (state.agentsOfflineAfter || 120);
 }
@@ -906,6 +935,7 @@ function monitorCard(m, options = {}) {
     <div class="mc-top">${typeChip(m.type)}<div style="display:flex;gap:5px;align-items:center">${warn}${statusPill(status)}</div></div>
     <div class="mc-name" title="${esc(m.name)}">${esc(m.name)}</div>
     <div class="mc-target" title="${esc(m.target)}">${esc(m.target)}</div>
+    ${m.probe_agent_id ? `<div class="mc-probe" title="محل اجرای تست">${icon('agent')} تست از ${esc(m.probe_agent_name || 'سرور انتخاب‌شده')}</div>` : ''}
     <div class="mc-spark"><canvas class="spark" data-points="${spark.join(',')}" data-color="${sparkColor(status)}"></canvas></div>
     <div class="mc-foot">
       <span class="mc-stat"><b class="${m.uptime_24h >= 99 ? 'ok' : m.uptime_24h > 0 && m.uptime_24h < 95 ? 'bad' : ''}">${m.uptime_24h ? uptimePct(m.uptime_24h) : '—'}</b> آپتایم</span>
@@ -1255,6 +1285,7 @@ async function openMonitorDetail(id, opts = {}) {
   const resolved = Array.isArray(meta.resolved) ? meta.resolved : [];
   const configRows = [
     ['نوع', typeMeta(m.type).label],
+    ['تست از', m.probe_agent_id ? (m.probe_agent_name || 'سرور انتخاب‌شده') : 'پنل اصلی'],
     ['گروه', m.group || '—'],
     ['فاصله بررسی', `${num(m.interval_sec)} ثانیه`],
     ['مهلت', `${num(m.timeout_ms)} میلی‌ثانیه`],
@@ -1385,8 +1416,18 @@ function renderIncidents() {
 }
 
 /* ------------------------------------------------------------------ servers */
+function agentTransport(a) {
+  if (a.transport === 'gRPC') return 'gRPC';
+  if (a.transport === 'WebSocket') return 'WebSocket';
+  if (a.connected || statusFromAgent(a)) return 'REST';
+  return '';
+}
+function transportChipClass(a) {
+  return a.transport === 'gRPC' ? 'violet' : a.transport === 'WebSocket' ? 'cyan' : '';
+}
 function agentCard(a) {
   const q = agentQuality(a);
+  const transport = agentTransport(a);
   const services = Array.isArray(a.services) ? a.services : [];
   const wg = Array.isArray(a.wireguard) ? a.wireguard : [];
   const serviceOnline = services.filter((s) => s.active).length;
@@ -1398,7 +1439,7 @@ function agentCard(a) {
     </div>
     <div class="agent-connection">
       <span class="agent-quality ${q.cls}" data-agent-quality>${icon('signal')} ${q.text}</span>
-      <span class="chip cyan">REST</span>
+      <span class="chip ${transportChipClass(a)}" data-agent-transport style="${transport ? '' : 'display:none'}">${transport || 'REST'}</span>
       <span class="agent-ip" data-agent-ip>${esc(a.ip || 'بدون IP')}</span>
     </div>
     <div class="gauges">
@@ -1412,7 +1453,7 @@ function agentCard(a) {
       <div class="telemetry-item" data-agent-net><b style="direction:ltr">${a.net_rx_bps ? bytes(a.net_rx_bps) + '/s' : '—'}</b><span>دریافت</span></div>
     </div>
     ${services.length ? `<div class="service-chips">${services.slice(0, 5).map((s) => `<span class="service-chip ${s.active ? '' : 'off'}"><span class="dot"></span>${esc(s.name)}</span>`).join('')}${services.length > 5 ? `<span class="service-chip">+${num(services.length - 5)}</span>` : ''}</div>` : ''}
-    <div class="agent-foot"><span data-agent-foot>${wg.length ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard` : services.length ? `${icon('sliders')} ${num(serviceOnline)} از ${num(services.length)} سرویس فعال` : q.online ? 'ارتباط REST برقرار است' : 'آخرین گزارش ' + timeAgo(a.last_seen)}</span><span data-agent-version>${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}</span></div>
+    <div class="agent-foot"><span data-agent-foot>${wg.length ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard` : services.length ? `${icon('sliders')} ${num(serviceOnline)} از ${num(services.length)} سرویس فعال` : q.online ? `ارتباط ${transport || 'زنده'} برقرار است` : 'آخرین گزارش ' + timeAgo(a.last_seen)}</span><span data-agent-version>${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}</span></div>
   </article>`;
 }
 
@@ -1432,6 +1473,13 @@ function updateAgentCard(a) {
   }
   const ipEl = card.querySelector('[data-agent-ip]');
   if (ipEl) ipEl.textContent = a.ip || 'بدون IP';
+  const transport = agentTransport(a);
+  const transportEl = card.querySelector('[data-agent-transport]');
+  if (transportEl) {
+    transportEl.textContent = transport || 'REST';
+    transportEl.className = `chip ${transportChipClass(a)}`;
+    transportEl.style.display = transport ? '' : 'none';
+  }
   const hostEl = card.querySelector('[data-agent-host]');
   if (hostEl) hostEl.textContent = `${a.hostname || '—'}${a.os ? ' · ' + a.os : ''}`;
   [['cpu', a.cpu_pct], ['ram', a.ram_pct], ['disk', a.disk_pct]].forEach(([key, raw]) => {
@@ -1451,7 +1499,7 @@ function updateAgentCard(a) {
       ? `${icon('link')} ${num(wg.length)} اینترفیس WireGuard`
       : services.length
         ? `${icon('sliders')} ${num(services.filter((s) => s.active).length)} از ${num(services.length)} سرویس فعال`
-        : q.online ? 'ارتباط REST برقرار است' : 'آخرین گزارش ' + timeAgo(a.last_seen);
+        : q.online ? `ارتباط ${transport || 'زنده'} برقرار است` : 'آخرین گزارش ' + timeAgo(a.last_seen);
   }
   const version = card.querySelector('[data-agent-version]');
   if (version) version.textContent = `${a.version ? 'v' + fa(a.version) : ''} · ${timeAgo(a.last_seen)}`;
@@ -1484,7 +1532,19 @@ function updateAgentDetailLive(a) {
   const quality = modal.querySelector('[data-agent-detail-quality]');
   if (quality) {
     quality.className = `agent-quality ${q.cls}`;
-    quality.innerHTML = `${icon('signal')} ${q.online ? 'REST متصل' : 'قطع ارتباط'}`;
+    quality.innerHTML = `${icon('signal')} ${q.online ? `${agentTransport(a) || 'زنده'} متصل` : 'قطع ارتباط'}`;
+  }
+  const transportEl = modal.querySelector('[data-agent-detail-transport]');
+  if (transportEl) {
+    const transport = agentTransport(a);
+    transportEl.textContent = transport || 'REST';
+    transportEl.className = `chip ${transportChipClass(a)}`;
+  }
+  const xrayEl = modal.querySelector('[data-agent-detail-xray]');
+  if (xrayEl) {
+    xrayEl.textContent = a.can_check
+      ? (a.xray_available ? `Xray ${a.xray_version || ''}`.trim() : 'بدون Xray')
+      : q.online ? 'نیازمند اتصال زنده' : 'آفلاین';
   }
   const seenInline = modal.querySelector('[data-agent-detail-seen-inline]');
   if (seenInline) seenInline.textContent = `آخرین گزارش: ${timeAgo(a.last_seen)}`;
@@ -1515,12 +1575,12 @@ function renderServers() {
       <button class="btn btn-primary" type="button" data-action="new-agent">${icon('plus')} افزودن سرور</button>
     </div>
     ${agents.length ? `<div class="agent-grid">${agents.slice().sort((a, b) => Number(statusFromAgent(b)) - Number(statusFromAgent(a)) || a.name.localeCompare(b.name, 'fa')).map(agentCard).join('')}</div>` : `<div class="panel empty" style="margin-top:8px">
-      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۱ ثانیه با REST به پالس گزارش شود.</p>
+      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۱ ثانیه از طریق اتصال زنده به پالس گزارش شود.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px"><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button><button class="btn btn-sm" type="button" data-action="agent-guide">${icon('terminal')} نصب یک‌خطی</button></div>
     </div>`}
     <div class="banner" style="margin-top:16px">
       <div class="banner-ico">${icon('signal')}</div>
-      <div class="banner-body"><b>پروتکل اتصال ایجنت</b><p>ایجنت با هندشیک اولیه، keep-alive و backoff خودکار به پنل وصل می‌شود. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:var(--link-text)">pulse-agent update</code>.</p></div>
+      <div class="banner-body"><b>اتصال زندهٔ ایجنت</b><p>ایجنت ابتدا gRPC و در صورت نبود HTTP/2 از WebSocket استفاده می‌کند؛ در نهایت هم REST به‌عنوان fallback فعال می‌ماند. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:var(--link-text)">pulse-agent update</code>.</p></div>
     </div>`;
 }
 
@@ -1895,7 +1955,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.4.4')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.5.0')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -2034,15 +2094,50 @@ async function hydrateCFSelects(form, monitor) {
     if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:var(--link-text)">کلادفلر را متصل کنید</a>.`;
   }
 }
+function probeAgentHelp(agent, type) {
+  if (!agent) return 'تست‌ها از خود پنل انجام می‌شوند. برای دید از شبکهٔ یک سرور دیگر، ایجنت آن را انتخاب کنید.';
+  const online = statusFromAgent(agent);
+  const parts = [`تست از سرور «${agent.name}»`];
+  if (!online) parts.push('ایجنت آفلاین است؛ تا اتصال مجدد، بررسی از این سرور انجام نمی‌شود');
+  else if (agent.can_check === false && agent.transport === 'REST') parts.push('اتصال زندهٔ ایجنت برقرار نیست؛ برای تست از راه دور، gRPC/WebSocket لازم است');
+  else if (agent.can_check === false) parts.push('این ایجنت از تست از راه دور پشتیبانی نمی‌کند؛ نسخهٔ ایجنت را به ۱.۵ به‌روزرسانی کنید');
+  if (type === 'proxy') {
+    if (agent.xray_available) parts.push(`Xray ${agent.xray_version || ''}`.trim());
+    else parts.push('Xray روی این ایجنت شناسایی نشده؛ فقط بررسی سریع TCP/TLS انجام می‌شود');
+  }
+  return parts.join(' · ');
+}
+
+function updateProbeAgentHelp(form, type) {
+  if (!form) return;
+  const select = form.querySelector('#m-probe-agent');
+  const help = form.querySelector('#m-probe-help');
+  if (!select || !help) return;
+  const agent = (state.agents || []).find((a) => Number(a.id) === Number(select.value));
+  help.textContent = probeAgentHelp(agent, type);
+  help.classList.toggle('bad', !!agent && !statusFromAgent(agent));
+}
+
 async function openMonitorForm(monitor = null) {
   let m = monitor;
   if (typeof m === 'number') {
     try { m = (await api(`/api/monitors/${m}`)).monitor; } catch (e) { toast(e.message, 'error'); return; }
   }
+  try {
+    const data = await api('/api/agents');
+    state.agents = data.agents || [];
+    state.agentsOfflineAfter = data.offline_after_sec || state.agentsOfflineAfter;
+  } catch { /* keep the cached agent list */ }
   const cfg = m?.config && typeof m.config === 'object' ? m.config : {};
   const type = m?.type || 'http';
   const target = targetMeta(type);
   const hasCF = !!m?.cf_enabled;
+  const probeID = Number(m?.probe_agent_id) || 0;
+  const probeAgent = (state.agents || []).find((a) => Number(a.id) === probeID) || null;
+  const probeOptions = [
+    `<option value="0" ${probeID ? '' : 'selected'}>پنل اصلی (همین سرور)</option>`,
+    ...(state.agents || []).map((a) => `<option value="${a.id}" ${Number(a.id) === probeID ? 'selected' : ''}>${esc(a.name)}${statusFromAgent(a) ? '' : ' · آفلاین'}</option>`),
+  ].join('');
   const body = `<form id="monitor-form" data-form="monitor" data-id="${m?.id || ''}" novalidate>
     <div class="form-error"></div>
     <div class="form-section" style="border-top:0;margin-top:0;padding-top:0">
@@ -2056,6 +2151,11 @@ async function openMonitorForm(monitor = null) {
       <div class="field"><label>نام مانیتور <span class="req">*</span></label><input class="input" name="name" id="m-name" value="${esc(m?.name || '')}" placeholder="مثلاً سایت اصلی" required></div>
       <div class="field"><label>گروه (اختیاری)</label><input class="input" name="group" id="m-group" value="${esc(m?.group || '')}" placeholder="مثلاً پروژه آلفا"></div>
       <div class="field full"><label id="m-target-label">${target.label} <span class="req">*</span></label><input class="input ${type === 'proxy' ? '' : 'ltr'}" name="target" id="m-target" value="${esc(m?.target || '')}" placeholder="${esc(target.placeholder)}" required><div class="help" id="m-target-hint">${target.hint}</div></div>
+      <div class="field full">
+        <label>اجرای تست از</label>
+        <select class="select" name="probe_agent_id" id="m-probe-agent">${probeOptions}</select>
+        <div class="help ${probeAgent && !statusFromAgent(probeAgent) ? 'bad' : ''}" id="m-probe-help">${probeAgentHelp(probeAgent, type)}</div>
+      </div>
     </div>
     <div class="form-grid" id="type-fields" style="margin-top:12px">${monitorTypeFields(type, cfg)}</div>
     <div class="form-grid" style="margin-top:12px">
@@ -2088,6 +2188,11 @@ async function openMonitorForm(monitor = null) {
   });
   const form = $('#monitor-form');
   if (!form) return;
+  form.querySelector('#m-probe-agent')?.addEventListener('change', () => {
+    const formType = form.querySelector('#m-type')?.value || 'http';
+    updateProbeAgentHelp(form, formType);
+    if (formType === 'proxy') refreshXrayHint();
+  });
   form.querySelector('#m-cf-enabled')?.addEventListener('change', (e) => {
     $('#m-cf-extra')?.classList.toggle('hidden', !e.target.checked);
   });
@@ -2097,6 +2202,16 @@ async function openMonitorForm(monitor = null) {
 async function refreshXrayHint() {
   const el = $('#xray-hint');
   if (!el) return;
+  const probeID = Number($('#m-probe-agent')?.value) || 0;
+  const agent = (state.agents || []).find((a) => Number(a.id) === probeID);
+  if (agent) {
+    if (agent.xray_available) {
+      el.innerHTML = `<span style="color:var(--success-text)">Xray ${esc(agent.xray_version || '')} روی ایجنت «${esc(agent.name)}» آماده است</span> — هندشیک واقعی از همان سرور انجام می‌شود.`;
+    } else {
+      el.innerHTML = `Xray روی ایجنت «${esc(agent.name)}» شناسایی نشده؛ فقط بررسی سریع TCP/TLS انجام می‌شود. برای هندشیک واقعی، Xray را روی همان ایجنت نصب کنید.`;
+    }
+    return;
+  }
   el.textContent = 'در حال بررسی هستهٔ Xray…';
   try {
     const data = await api('/api/xray/status');
@@ -2211,9 +2326,9 @@ function openAgentGuide() {
     body: `<div class="steps">
       <div class="step"><span class="step-num">۱</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
       <div class="step"><span class="step-num">۲</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
-      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال REST را با <code>pulse-agent status</code> ببین. گزارش‌ها هر ۱ ثانیه ارسال می‌شوند و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
+      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال زنده را با <code>pulse-agent status</code> ببین. آمار هر ۱ ثانیه می‌رسد و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
     </div>
-    <div class="agent-rest-note">${icon('signal')} اتصال REST/JSON با هندشیک اولیه، keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
+    <div class="agent-rest-note">${icon('signal')} اتصال gRPC با fallback به WebSocket و REST؛ keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
     <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. توکن را در جای امن نگه دار.</div></div>`,
     footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">بستن</button><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button>`,
   });
@@ -2231,16 +2346,16 @@ function openAgentToken(data, title = 'ایجنت آماده نصب است') {
   const install = data.install_command || data.command || '';
   openModal({
     title,
-    subtitle: 'نصب REST با یک دستور روی VPS مقصد',
+    subtitle: 'نصب اتصال زنده با یک دستور روی VPS مقصد',
     size: 'lg',
     body: `<div class="warning-note" style="margin:0 0 12px">${icon('alert')} <div>این توکن فقط یک‌بار نمایش داده می‌شود. اگر گم شد، از داخل پنل توکن جدید بسازید.</div></div>
       <div class="install-card">
-        <div class="install-card-head"><span class="install-badge">${icon('terminal')} نصب یک‌خطی</span><span class="chip green">REST</span></div>
+        <div class="install-card-head"><span class="install-badge">${icon('terminal')} نصب یک‌خطی</span><span class="chip green">gRPC</span></div>
         <div class="code-block" id="agent-install">${esc(install)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-install">کپی</button></div>
-        <div class="install-help">روی VPS مقصد، با کاربر root اجرا کن. اسکریپت باینری را از GitHub Releases دانلود می‌کند، سرویس <code>pulse-agent</code> را می‌سازد و اتصال REST را با backoff خودکار بالا می‌آورد.</div>
+        <div class="install-help">روی VPS مقصد، با کاربر root اجرا کن. اسکریپت باینری را از GitHub Releases دانلود می‌کند، Xray رسمی را برای تست کانفیگ نصب می‌کند و سرویس <code>pulse-agent</code> را با اتصال زنده بالا می‌آورد.</div>
       </div>
       <div class="token-box" style="margin-top:14px"><b>AGENT TOKEN</b><code id="agent-token">${esc(data.token || '')}</code><button class="btn btn-sm btn-ghost" style="margin-top:6px" type="button" data-action="copy" data-copy-target="agent-token">${icon('copy')} کپی توکن</button></div>
-      <div class="agent-rest-note">${icon('signal')} پروتکل ایجنت: REST/JSON · هندشیک اولیه + گزارش دوره‌ای + تلاش مجدد خودکار</div>
+      <div class="agent-rest-note">${icon('signal')} پروتکل ایجنت: gRPC + WebSocket + fallback REST · گزارش زندهٔ ۱ ثانیه‌ای</div>
       <details class="agent-manual">
         <summary>${icon('sliders')} نصب دستی / عیب‌یابی پیشرفته</summary>
         ${data.download_command ? `<div style="margin-top:10px"><div class="form-section-title">${icon('download')} دریافت باینری</div><div class="code-block" id="agent-download">${esc(data.download_command)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-download">کپی</button></div></div>` : ''}
@@ -2275,11 +2390,12 @@ async function openAgentDetail(id, opts = {}) {
     <div class="detail-actions"><button class="btn btn-sm" type="button" data-action="edit-agent" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-soft" type="button" data-action="rotate-agent" data-id="${a.id}">${icon('key')} توکن جدید</button></div>
   </div>
   <div class="agent-connection detail-connection">
-    <span class="agent-quality ${online ? 'great' : 'off'}" data-agent-detail-quality>${icon('signal')} ${online ? 'REST متصل' : 'قطع ارتباط'}</span>
-    <span class="chip cyan">JSON REST</span>
+    <span class="agent-quality ${online ? 'great' : 'off'}" data-agent-detail-quality>${icon('signal')} ${online ? `${agentTransport(a) || 'زنده'} متصل` : 'قطع ارتباط'}</span>
+    <span class="chip ${transportChipClass(a)}" data-agent-detail-transport>${agentTransport(a) || 'REST'}</span>
     <span data-agent-detail-seen-inline>آخرین گزارش: ${timeAgo(a.last_seen)}</span>
     <span class="agent-update-hint">${icon('terminal')} <code>pulse-agent update</code></span>
   </div>
+  ${a.can_check && online && !a.xray_available ? `<div class="warning-note" style="margin-top:10px">${icon('alert')} <div>برای تست واقعی کانفیگ از این ایجنت، Xray روی آن شناسایی نشده است. نصب‌کنندهٔ جدید ایجنت Xray رسمی را نصب می‌کند؛ برای ایجنت فعلی، Xray را نصب یا ایجنت را با نصب‌کنندهٔ جدید دوباره نصب کنید و سرویس ایجنت را ری‌استارت کنید.</div></div>` : ''}
   <div class="gauges" style="padding:16px 0 8px">
     ${gaugeRing(a.cpu_pct || 0, gaugeColor(a.cpu_pct || 0), 'CPU', 'cpu')}
     ${gaugeRing(a.ram_pct || 0, gaugeColor(a.ram_pct || 0), 'RAM', 'ram')}
@@ -2294,6 +2410,7 @@ async function openAgentDetail(id, opts = {}) {
     <div class="mini-stat"><span>ارسال</span><b style="font-size:11px" data-agent-detail-tx>${bytes(a.net_tx_bps || 0)}/s</b></div>
     <div class="mini-stat"><span>آخرین گزارش</span><b style="font-size:11px" data-agent-detail-seen>${timeAgo(a.last_seen)}</b></div>
     <div class="mini-stat"><span>نسخه ایجنت</span><b data-agent-detail-version>${a.version ? 'v' + fa(a.version) : '—'}</b></div>
+    <div class="mini-stat"><span>تست از این ایجنت</span><b style="font-size:11px" data-agent-detail-xray>${a.can_check ? (a.xray_available ? `Xray ${esc(a.xray_version || '')}` : 'بدون Xray') : online ? 'نیازمند اتصال زنده' : 'آفلاین'}</b></div>
   </div>
   <div class="detail-chart">
     <div class="detail-chart-head"><b>${icon('chart')} مصرف منابع</b><div class="range-tabs">${[6, 24, 72].map((h) => `<button type="button" data-action="agent-range" data-id="${id}" data-hours="${h}" class="${(opts.hours || 24) == h ? 'active' : ''}">${h === 24 ? '۲۴ ساعت' : h === 6 ? '۶ ساعت' : '۳ روز'}</button>`).join('')}</div></div>
@@ -2473,6 +2590,7 @@ async function onDocumentClick(e) {
         inp.placeholder = meta.placeholder;
         inp.classList.toggle('ltr', type !== 'proxy');
         form.querySelector('#m-target-hint').textContent = meta.hint;
+        updateProbeAgentHelp(form, type);
         wireLabels(form);
         if (type === 'proxy') {
           if (!form.dataset.id) {
@@ -2809,6 +2927,7 @@ async function onDocumentSubmit(e) {
       if (cfEnabled && (!cfZone || !cfRecord)) throw new Error('برای سوییچ خودکار DNS، Zone و رکورد را انتخاب کنید');
       const body = {
         name, type, target, group: formVal(form, 'group'), config: cfg,
+        probe_agent_id: Number(formVal(form, 'probe_agent_id')) || 0,
         interval_sec: Number(formVal(form, 'interval_sec')) || 60,
         timeout_ms: Number(formVal(form, 'timeout_ms')) || 12000,
         enabled: formChecked(form, 'enabled'),

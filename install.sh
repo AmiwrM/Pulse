@@ -19,7 +19,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.4.4"
+INSTALLER_VERSION="1.5.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 BRANCH="${PULSE_BRANCH:-main}"
 REPO_URL="https://github.com/${REPO_SLUG}"
@@ -646,7 +646,20 @@ if [[ "$USE_SSL" == "yes" ]]; then
   {
     printf '%s {\n' "$DOMAIN"
     printf '\tencode gzip\n'
-    printf '\treverse_proxy 127.0.0.1:%s {\n\t\tflush_interval -1\n\t}\n' "$PORT"
+    # The agent link is a gRPC bidirectional stream. Caddy terminates TLS and
+    # speaks h2c to Pulse for this path only; normal UI/SSE traffic stays on
+    # HTTP/1.1 and WebSocket remains available as a fallback.
+    printf '\t@pulse_grpc {\n'
+    printf '\t\tpath /pulse.agent.v1.AgentLink/*\n'
+    printf '\t\theader Content-Type application/grpc*\n'
+    printf '\t}\n'
+    printf '\thandle @pulse_grpc {\n'
+    printf '\t\treverse_proxy 127.0.0.1:%s {\n' "$PORT"
+    printf '\t\t\ttransport http {\n\t\t\t\tversions h2c 2\n\t\t\t}\n'
+    printf '\t\t}\n\t}\n'
+    printf '\thandle {\n'
+    printf '\t\treverse_proxy 127.0.0.1:%s {\n\t\t\tflush_interval -1\n\t\t}\n' "$PORT"
+    printf '\t}\n'
     printf '\theader {\n\t\t-Server\n\t}\n'
     printf '}\n'
   } >"$PULSE_CADDY"

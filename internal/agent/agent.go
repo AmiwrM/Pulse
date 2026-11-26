@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version         = "1.4.4"
+	Version         = "1.5.0"
 	ProtocolVersion = 2
 )
 
@@ -31,6 +31,7 @@ type Options struct {
 	CollectWG bool
 	Once      bool
 	Version   string
+	XrayBin   string
 }
 
 type Service struct {
@@ -299,35 +300,9 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 		return nil
 	}
 
-	logger.Info("pulse agent started", "server", server, "name", opts.Name, "interval", interval.String(), "services", opts.Services, "transport", "REST")
-	// A best-effort handshake gives operators an early token/server diagnostic.
-	// It must not prevent reporting if an older panel does not expose the endpoint.
-	if err := client.hello(ctx); err != nil {
-		logger.Warn("agent handshake failed; reports will still be attempted", "error", err)
-	}
-
-	failures := 0
-	delay := time.Duration(0)
-	for {
-		if err := wait(ctx, delay); err != nil {
-			return nil
-		}
-		start := time.Now()
-		_, report := coll.snapshot()
-		report.Version = opts.Version
-		err := client.report(ctx, report)
-		elapsed := time.Since(start)
-		if err != nil {
-			failures++
-			delay = retryDelay(failures)
-			logger.Warn("agent report failed; retrying", "error", err, "failures", failures, "retry_in", delay.String())
-			continue
-		}
-		failures = 0
-		delay = interval - elapsed
-		if delay < time.Second {
-			delay = time.Second
-		}
-		logger.Info("agent report sent", "rtt_ms", elapsed.Milliseconds(), "cpu", report.CPUPct, "ram", report.RAMPct, "disk", report.DiskPct)
-	}
+	opts.Server = server
+	runner := newAgentRunner(opts, logger)
+	logger.Info("pulse agent started", "server", server, "name", opts.Name, "interval", interval.String(),
+		"services", opts.Services, "transport", "gRPC/WebSocket (REST fallback)")
+	return runner.runLive(ctx)
 }

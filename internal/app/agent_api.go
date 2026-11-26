@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"pulse/internal/model"
 )
 
 // handleAgentHello is the REST handshake used by the agent before it starts
@@ -28,8 +30,10 @@ func (a *App) handleAgentHello(w http.ResponseWriter, r *http.Request) {
 			"id": ag.ID, "name": ag.Name,
 		},
 		"server_version":      a.cfg.Version,
-		"protocol_version":    2,
+		"protocol_version":    3,
 		"report_interval_sec": 1,
+		"link":                true,
+		"transports":          []string{"grpc", "websocket"},
 		"offline_after_sec":   conf.AgentOfflineAfterSec,
 		"server_time":         nowUnix(),
 	})
@@ -52,6 +56,7 @@ func (a *App) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "دریافت سرورها ناموفق بود")
 		return
 	}
+	agents = a.enrichAgents(agents)
 	conf := a.config()
 	writeData(w, map[string]any{
 		"agents":            agents,
@@ -115,6 +120,11 @@ func (a *App) handleRotateAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "تولید توکن جدید ناموفق بود")
 		return
 	}
+	// The old live session is now unauthorized; drop it so a stale token cannot
+	// keep running remote checks until the next reconnect.
+	if s := a.links.close(id, "agent token rotated"); s != nil {
+		a.onAgentLinkDown(s)
+	}
 	server := a.publicBase(r)
 	command := fmt.Sprintf("sudo ./pulse --agent --server %s --token %s --name %s --interval 1s",
 		shellQuote(server), shellQuote(token), shellQuote(ag.Name))
@@ -166,6 +176,9 @@ func (a *App) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "سرور پیدا نشد")
 		return
 	}
+	if s := a.links.close(id, "agent deleted"); s != nil {
+		a.onAgentLinkDown(s)
+	}
 	if err := a.db.DeleteAgent(id); err != nil {
 		writeErr(w, 500, "حذف سرور ناموفق بود")
 		return
@@ -199,7 +212,8 @@ func (a *App) handleAgentMetrics(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "دریافت نمودار ناموفق بود")
 		return
 	}
-	writeData(w, map[string]any{"agent": ag, "metrics": metrics, "server_time": nowUnix()})
+	enriched := a.enrichAgents([]model.Agent{*ag})
+	writeData(w, map[string]any{"agent": enriched[0], "metrics": metrics, "server_time": nowUnix()})
 }
 
 func shellQuote(s string) string {

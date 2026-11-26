@@ -15,6 +15,8 @@ type Monitor struct {
 
 	Config json.RawMessage `json:"config"`
 
+	ProbeAgentID int64 `json:"probe_agent_id"`
+
 	Status         string `json:"status"`
 	LastCheckedAt  int64  `json:"last_checked_at"`
 	LastLatencyMS  int64  `json:"last_latency_ms"`
@@ -43,6 +45,7 @@ type Monitor struct {
 	UpdatedAt int64 `json:"updated_at"`
 
 	// Computed fields, not persisted.
+	ProbeAgentName string    `json:"probe_agent_name,omitempty"`
 	Uptime24       float64   `json:"uptime_24h"`
 	AvgLatency     int64     `json:"avg_latency_ms"`
 	Spark          []int64   `json:"spark"`
@@ -117,6 +120,16 @@ type Agent struct {
 	WireGuard       json.RawMessage `json:"wireguard"`
 	Notes           string          `json:"notes"`
 	OfflineNotified bool            `json:"-"`
+
+	// Live-link fields, populated for API responses. They are not persisted
+	// because the link state is inherently ephemeral.
+	Connected     bool   `json:"connected"`
+	Transport     string `json:"transport,omitempty"`
+	Protocol      int    `json:"protocol,omitempty"`
+	CanCheck      bool   `json:"can_check"`
+	XrayAvailable bool   `json:"xray_available"`
+	XrayVersion   string `json:"xray_version,omitempty"`
+	ConnectedAt   int64  `json:"connected_at,omitempty"`
 }
 
 type AgentMetric struct {

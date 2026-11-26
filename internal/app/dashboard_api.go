@@ -16,11 +16,12 @@ func (a *App) handleSummary(w http.ResponseWriter, r *http.Request) {
 	a.enrichMonitors(monitors)
 
 	agents, _ := a.db.ListAgents()
+	agents = a.enrichAgents(agents)
 	conf := a.config()
 	now := nowUnix()
 	onlineAgents := 0
 	for _, ag := range agents {
-		if ag.LastSeen > 0 && now-ag.LastSeen <= int64(conf.AgentOfflineAfterSec) {
+		if ag.Connected {
 			onlineAgents++
 		}
 	}

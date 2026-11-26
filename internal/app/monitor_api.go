@@ -20,6 +20,7 @@ type monitorInput struct {
 	Group            string          `json:"group"`
 	IntervalSec      int             `json:"interval_sec"`
 	TimeoutMS        int             `json:"timeout_ms"`
+	ProbeAgentID     int64           `json:"probe_agent_id"`
 	Enabled          *bool           `json:"enabled"`
 	Config           json.RawMessage `json:"config"`
 	FailThreshold    int             `json:"fail_threshold"`
@@ -65,6 +66,9 @@ func (in *monitorInput) normalize() error {
 	if in.TimeoutMS > 180000 {
 		in.TimeoutMS = 180000
 	}
+	if in.ProbeAgentID < 0 {
+		in.ProbeAgentID = 0
+	}
 	if in.FailThreshold <= 0 {
 		in.FailThreshold = 2
 	}
@@ -104,6 +108,7 @@ func (in *monitorInput) apply(m *model.Monitor) {
 	m.Group = in.Group
 	m.Interval = in.IntervalSec
 	m.Timeout = in.TimeoutMS
+	m.ProbeAgentID = in.ProbeAgentID
 	m.Config = in.Config
 	m.FailThreshold = in.FailThreshold
 	m.RecoverThreshold = in.RecoverThreshold
@@ -132,6 +137,20 @@ func (a *App) handleListMonitors(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) validateProbeAgent(id int64) error {
+	if id <= 0 {
+		return nil
+	}
+	ag, err := a.db.GetAgent(id)
+	if err != nil {
+		return fmt.Errorf("بررسی سرور تست ناموفق بود")
+	}
+	if ag == nil {
+		return fmt.Errorf("سرور تست انتخاب‌شده پیدا نشد")
+	}
+	return nil
+}
+
 func collectGroups(monitors []model.Monitor) []string {
 	set := map[string]bool{}
 	for _, m := range monitors {
@@ -156,6 +175,21 @@ func (a *App) enrichMonitors(monitors []model.Monitor) {
 				monitors[i].AvgLatency = st.AvgLatency
 				if len(st.Spark) > 0 {
 					monitors[i].Spark = st.Spark
+				}
+			}
+		}
+	}
+	if agents, err := a.db.ListAgents(); err == nil {
+		names := make(map[int64]string, len(agents))
+		for _, ag := range agents {
+			names[ag.ID] = ag.Name
+		}
+		for i := range monitors {
+			if monitors[i].ProbeAgentID > 0 {
+				if name, ok := names[monitors[i].ProbeAgentID]; ok {
+					monitors[i].ProbeAgentName = name
+				} else {
+					monitors[i].ProbeAgentName = "سرور حذف‌شده"
 				}
 			}
 		}
@@ -238,6 +272,10 @@ func (a *App) handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if err := a.validateProbeAgent(in.ProbeAgentID); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
@@ -280,8 +318,13 @@ func (a *App) handleUpdateMonitor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if err := a.validateProbeAgent(in.ProbeAgentID); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	wasEnabled := old.Enabled
 	oldType, oldTarget := old.Type, old.Target
+	oldProbeAgent := old.ProbeAgentID
 	in.apply(old)
 	if err := a.db.UpdateMonitor(old); err != nil {
 		writeErr(w, 500, "ذخیره مانیتور ناموفق بود")
@@ -294,7 +337,7 @@ func (a *App) handleUpdateMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if old.Enabled && (enabledChanged || old.Type != oldType || old.Target != oldTarget) {
+	if old.Enabled && (enabledChanged || old.Type != oldType || old.Target != oldTarget || old.ProbeAgentID != oldProbeAgent) {
 		_ = a.db.ResetMonitorState(id)
 		a.triggerCheck(id)
 	}

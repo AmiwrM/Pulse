@@ -15,7 +15,7 @@ import (
 	"pulse/internal/app"
 )
 
-var version = "1.4.4"
+var version = "1.5.0"
 
 func main() {
 	if handleManagementCLI(os.Args[1:]) {
@@ -34,6 +34,7 @@ func main() {
 		services  = flag.String("services", env("PULSE_AGENT_SERVICES", ""), "comma separated systemd services to monitor")
 		collectWG = flag.Bool("wg", envBool("PULSE_AGENT_WG", true), "collect WireGuard handshake data")
 		once      = flag.Bool("once", false, "send a single report and exit (agent mode)")
+		xrayBin   = flag.String("xray-bin", env("PULSE_XRAY_BIN", "xray"), "Xray binary used for remote proxy checks (agent mode)")
 	)
 	flag.Parse()
 
@@ -69,6 +70,7 @@ func main() {
 			CollectWG: *collectWG,
 			Once:      *once,
 			Version:   version,
+			XrayBin:   *xrayBin,
 		}, logger)
 		if err != nil {
 			logger.Error("agent stopped", "error", err)

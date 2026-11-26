@@ -23,6 +23,11 @@ type Result struct {
 	Warn         string         `json:"warn"`
 	SSLExpiresAt int64          `json:"ssl_expires_at"`
 	Meta         map[string]any `json:"meta"`
+
+	// ProbeFailed means the target was not actually evaluated (for example the
+	// selected agent is offline). The scheduler records it as a warning instead
+	// of opening a false incident.
+	ProbeFailed bool `json:"-"`
 }
 
 type Manager struct {
@@ -36,7 +41,7 @@ type Manager struct {
 func New(defaultDNS string) *Manager {
 	return &Manager{
 		DefaultDNS:          defaultDNS,
-		UserAgent:           "Pulse/1.4 (+https://github.com/AmiwrM/Pulse)",
+		UserAgent:           "Pulse/1.5 (+https://github.com/AmiwrM/Pulse)",
 		defaultProxyTestURL: xray.DefaultTestURL,
 	}
 }

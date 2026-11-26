@@ -10,14 +10,14 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.4.4
+### خلاصهٔ نسخهٔ 1.5.0
 
-- نوار بالا به‌صورت تمام‌عرض تا لبهٔ صفحه و منو کشیده می‌شود؛ هالهٔ رنگی گیج نرم‌تر شده و مرز آن دیده نمی‌شود؛ واژهٔ «نود» با «کانفیگ» جایگزین شده و آیکون‌های ریز کمی بزرگ‌تر شده‌اند.
-- ایجنت با **REST/JSON**، هندشیک اولیه، keep-alive و **backoff خودکار**؛ گزارش هر **۱ ثانیه** و به‌روزرسانی UI با SSE.
-- نصب ایجنت با **یک دستور** از داخل پنل؛ توکن در `/etc/pulse/agent.env`.
-- دستورهای مدیریت: `pulse update|restart|status|logs` و `pulse-agent` / `pulse-a`.
-- **تم روشن و تیره** با دکمهٔ خورشید/ماه در نوار بالا (انتخاب در مرورگر ذخیره می‌شود)، آیکون‌های یکدست، هاله‌های نرم‌تر و سایه‌های لایه‌ای.
-- اصلاح پینگ کانفیگ: تست واقعی Xray حتی بعد از رد شدن probe اولیه، timeout واقع‌گرایانه و دکمهٔ بررسی فوری با انتظار نتیجه.
+- **اتصال زندهٔ ایجنت** با gRPC (و fallback خودکار به WebSocket و سپس REST)؛ گزارش منابع هر **۱ ثانیه** و نمایش فوری وضعیت اتصال/قطع.
+- **تست از ایجنت انتخابی**: هر مانیتور می‌تواند هندشیک کانفیگ، TCP، ICMP، HTTP، DNS یا SSL را از شبکهٔ یک سرور دیگر اجرا کند؛ اگر ایجنت آفلاین باشد، وضعیت «هشدار» ثبت می‌شود و رخداد کاذب باز نمی‌شود.
+- ایجنت قابلیت تست و وضعیت Xray خود را اعلام می‌کند؛ نصب‌کنندهٔ ایجنت Xray رسمی را هم نصب می‌کند تا هندشیک واقعی از همان سرور انجام شود.
+- نصب ایجنت با **یک دستور** از داخل پنل؛ توکن در `/etc/pulse/agent.env`؛ مدیریت با `pulse-agent` / `pulse-a`.
+- **تم روشن و تیره**، آیکون‌های یکدست، هاله‌های نرم‌تر، هدر تمام‌عرض و رابط ریسپانسیو.
+- اصلاحات پایدارسازی: ماندگاری انتخاب ایجنت در مانیتور، پاک‌سازی ارجاع‌ها هنگام حذف ایجنت، و جلوگیری از رخداد کاذب هنگام خطای زیرساخت تست.
 
 ---
 
@@ -52,12 +52,13 @@
 | بخش | امکانات |
 |---|---|
 | **پایش سرویس** | HTTP/HTTPS (کد وضعیت، کلیدواژه، هدر، بدنه، Basic Auth، دنبال‌کردن ریدایرکت)، TCP، ICMP Ping، DNS (A/AAAA/CNAME/MX/TXT/NS)، گواهی SSL و کانفیگ پروکسی |
+| **تست از ایجنت** | اجرای هر نوع بررسی از شبکهٔ ایجنت انتخابی (مثلاً سرور ایران) برای تست کانفیگ، پینگ، TCP، HTTP، DNS و SSL؛ با تشخیص خطای زیرساخت و بدون رخداد کاذب |
 | **هندشیک واقعی** | موتور Xray v26.11.9 برای VMess/VLESS/Trojan/Shadowsocks/WireGuard؛ اجرای هستهٔ موقت + SOCKS محلی + درخواست HTTP واقعی از داخل تونل |
 | **آپتایم و نمودار** | آپتایم ۲۴ ساعته و ۳۰ روزه، نمودار تأخیر، رخدادها، Sparkline، روند کلی ۲۴ ساعته، تاریخ شمسی و اعداد فارسی |
 | **قوانین هوشمند** | رویدادمحور با آستانه، محدوده، محدودیت زمانی، کانال‌های تلگرام/Web Push/وب‌هوک و ساعات سکوت |
 | **اعلان‌ها** | تلگرام (HTML)، Web Push (PWA روی اندروید و iPhone با iOS 16.4+)، وب‌هوک امضاشده با HMAC-SHA256، سابقه ارسال |
 | **Cloudflare** | بررسی توکن، لیست Zone و رکوردها، تغییر دستی رکورد، سوییچ خودکار A/AAAA در قطعی و بازگردانی پس از بازیابی با محافظت از تغییرات دستی |
-| **سرورها** | ایجنت سبک Go با اتصال REST/JSON، هندشیک، keep-alive و backoff خودکار؛ CPU، RAM، Disk، Load، شبکه، آپتایم، وضعیت سرویس‌های systemd و همتایان WireGuard |
+| **سرورها** | ایجنت سبک Go با اتصال زندهٔ gRPC/WebSocket و fallback REST؛ گزارش هر ۱ ثانیه از CPU، RAM، Disk، Load، شبکه، آپتایم، وضعیت سرویس‌های systemd و همتایان WireGuard |
 | **امنیت** | حساب مدیر با bcrypt، نشست امضاشده، محدودیت تلاش ورود، CSRF، CSP، هدرهای امنیتی، توکن یک‌بارمصرف ایجنت |
 | **PWA** | نصب روی موبایل/دسکتاپ، آفلاین‌سازی پوسته، Service Worker، اعلان Push، آیکون‌های اختصاصی |
 | **رابط کاربری** | فارسی و RTL، فونت ایران‌سنس، **تم تیره و روشن**، هاله‌های نرم و سایه‌های لایه‌ای، آیکون‌های یکدست، انیمیشن، نمودارهای Canvas بدون کتابخانه خارجی، کاملاً ریسپانسیو |
@@ -115,8 +116,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.4.4
-git push origin v1.4.4
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -129,7 +130,7 @@ git push origin v1.4.4
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.4.4 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.5.0 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -171,8 +172,8 @@ pulse-agent update
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.4.4
-pulse-agent update --release v1.4.4
+pulse update --release v1.5.0
+pulse-agent update --release v1.5.0
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -304,9 +305,25 @@ Web Push و کوکی امن به HTTPS نیاز دارند. پیشنهاد: یک
 ```caddyfile
 status.example.com {
 	encode gzip
-	reverse_proxy 127.0.0.1:8080 {
-		# SSE (live updates) must not be buffered.
-		flush_interval -1
+
+	# gRPC live agent link (Caddy terminates TLS, h2c to Pulse)
+	@pulse_grpc {
+		path /pulse.agent.v1.AgentLink/*
+		header Content-Type application/grpc*
+	}
+	handle @pulse_grpc {
+		reverse_proxy 127.0.0.1:8080 {
+			transport http {
+				versions h2c 2
+			}
+		}
+	}
+
+	# UI, REST and the WebSocket agent fallback
+	handle {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+		}
 	}
 	header {
 		-Server
@@ -314,7 +331,7 @@ status.example.com {
 }
 ```
 
-در Caddyfile، `flush_interval -1` برای زنده‌ماندن SSE ضروری است.
+`flush_interval -1` برای زنده‌ماندن SSE ضروری است. اگر بلوک `@pulse_grpc` را اضافه نکنید، ایجنت‌ها به‌صورت خودکار از WebSocket استفاده می‌کنند و قابلیت تست از راه دور از دست نمی‌رود؛ فقط transport از gRPC به WebSocket تغییر می‌کند. اگر دامنه پشت Cloudflare است، برای gRPC باید HTTP/2 و gRPC در Cloudflare مجاز باشد؛ در غیر این صورت WebSocket fallback فعال می‌شود.
 
 ### Nginx
 
@@ -338,9 +355,25 @@ server {
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 3600s;
+
+        # WebSocket fallback for the agent live link
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 }
 ```
+
+برای gRPC روی Nginx می‌توانید مسیر ایجنت را جدا کنید (نسخهٔ Nginx باید HTTP/2 و `grpc_pass` داشته باشد):
+
+```nginx
+location /pulse.agent.v1.AgentLink/ {
+    grpc_pass grpc://127.0.0.1:8080;
+    grpc_read_timeout 3600s;
+    grpc_send_timeout 3600s;
+}
+```
+
+اگر این بلوک را اضافه نکنید، ایجنت از WebSocket استفاده می‌کند.
 
 بعد از فعال‌سازی HTTPS، آدرس عمومی را در **تنظیمات** وارد کنید؛ همین آدرس برای VAPID و ساخت فرمان نصب ایجنت استفاده می‌شود.
 
@@ -359,6 +392,8 @@ server {
 | SSL | `example.com` | SNI، آستانه هشدار روزهای باقی‌مانده |
 | Proxy | نام ساب | متن/URL سابسکریپشن، حداقل کانفیگ سالم |
 
+- **اجرای تست از:** برای هر نوع مانیتور می‌توانید یک ایجنت را انتخاب کنید. بررسی از همان سرور و با همان مسیر شبکه انجام می‌شود؛ مناسب برای تست کانفیگ از یک نود ایران، بررسی دسترسی از یک منطقهٔ دیگر یا تفکیک خطای مقصد از خطای پنل. گزینهٔ پیش‌فرض «پنل اصلی» است. اگر ایجنت انتخاب‌شده آفلاین باشد یا اتصال زنده نداشته باشد، نتیجه به‌صورت **هشدار (degraded)** با خطای «اتصال زندهٔ ایجنت برقرار نیست» ثبت می‌شود و برای مقصد رخداد کاذب باز نمی‌شود.
+- برای تست کانفیگ از ایجنت، Xray باید روی همان ایجنت نصب باشد. نصب‌کنندهٔ جدید ایجنت این کار را به‌صورت پیش‌فرض انجام می‌دهد؛ در صورت نصب با `--no-xray`، فقط بررسی سریع TCP/TLS انجام می‌شود.
 - **آستانه خطا** تعیین می‌کند پس از چند بررسی ناموفق، وضعیت «قطع» شود. **آستانه بازیابی** هم تعداد بررسی موفق لازم برای «سالم» شدن است؛ این دو از هشدارهای زودگذر جلوگیری می‌کنند.
 - برای هر مانیتور می‌توانید سوییچ خودکار DNS را فعال کنید (بخش Cloudflare).
 - گواهی SSL به‌صورت خودکار برای مانیتورهای HTTP و SSL ثبت می‌شود و در کارت‌ها هشدار انقضا نمایش داده می‌شود.
@@ -443,7 +478,7 @@ server {
 
 ## ایجنت سرور
 
-برای دیدن CPU/RAM/Disk، وضعیت سرویس‌ها و WireGuard، ایجنت را روی هر VPS نصب کنید. ایجنت همان باینری پالس است و در حالت `--agent` اجرا می‌شود. ارتباط ایجنت از نسخهٔ `1.4.3` یک REST/JSON با هندشیک اولیه، keep-alive و backoff خودکار است؛ اگر پنل لحظه‌ای در دسترس نباشد، ایجنت به‌جای قطع ماندن، خودش دوباره وصل می‌شود.
+برای دیدن CPU/RAM/Disk، وضعیت سرویس‌ها و WireGuard، ایجنت را روی هر VPS نصب کنید. ایجنت همان باینری پالس است و در حالت `--agent` اجرا می‌شود. از نسخهٔ `1.5.0` ارتباط اصلی یک **stream دوطرفهٔ gRPC** است که آمار را هر ۱ ثانیه می‌فرستد و دستور «اجرای تست» را از پنل می‌گیرد. اگر مسیر شبکه/reverse proxy از HTTP/2 پشتیبانی نکند، ایجنت به‌صورت خودکار **WebSocket** و در نهایت **REST** را انتخاب می‌کند؛ بنابراین پایش منابع در قطعی موقت یا پروکسی‌های ناسازگار متوقف نمی‌شود. ایجنت‌های قدیمی‌تر (نسخهٔ ۱.۴) فقط REST هستند و می‌توانند منابع را گزارش کنند، اما برای «تست از ایجنت» باید به ۱.۵ به‌روزرسانی شوند.
 
 ### ۱. ساخت توکن
 
@@ -463,6 +498,12 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/deploy/install-ag
     --name vps-frankfurt-1 \
     --services "xray,wireguard"
 ```
+
+نصب‌کننده به‌صورت پیش‌فرض آخرین Xray رسمی را هم نصب می‌کند تا تست واقعی کانفیگ از همان ایجنت انجام شود. برای صرفه‌جویی در فضا یا اگر Xray را خودتان مدیریت می‌کنید، `--no-xray` را اضافه کنید. برای مسیر سفارشی، `PULSE_XRAY_BIN=/path/to/xray` را در `/etc/pulse/agent.env` قرار دهید.
+
+در اتصال زنده، فاصلهٔ گزارش **۱ ثانیه** است (حتی اگر در یونیت قدیمی `--interval 5s` مانده باشد)؛ مقدار `--interval` برای fallback REST و سازگاری نگه داشته شده است.
+
+`pulse-agent update` فقط باینری ایجنت را به‌روزرسانی می‌کند و Xray نصب نمی‌کند. برای اضافه‌شدن Xray به یک ایجنت موجود، همان دستور نصب یک‌خطی را با `--server` و `--token` فعلی دوباره اجرا کنید (توکن در `/etc/pulse/agent.env` است) یا Xray را جداگانه نصب کنید.
 
 مدیریت ایجنت:
 
@@ -488,9 +529,10 @@ sudo bash -c 'set -a; . /etc/pulse/agent.env; set +a; /usr/local/bin/pulse --age
 
 ### چه چیزی ارسال می‌شود؟
 
-- CPU، RAM، Disk، Load 1m، Uptime، نرخ شبکه
+- CPU، RAM، Disk، Load 1m، Uptime و نرخ دریافت/ارسال شبکه — هر ۱ ثانیه
 - وضعیت سرویس‌های systemd که با `--services "nginx,xray"` مشخص کرده‌اید
 - اطلاعات WireGuard با فلگ `--wg` (پیش‌فرض روشن): همتاها، handshake و ترافیک
+- قابلیت اجرای تست و وضعیت Xray (برای انتخاب ایجنت به‌عنوان محل تست)
 
 ایجنت در بازهٔ پیش‌فرض **۱ ثانیه** گزارش REST می‌دهد و UI از طریق SSE همان لحظه به‌روز می‌شود. تاریخچهٔ نمودار هر ۱۰ ثانیه ذخیره می‌شود تا دیتابیس با گزارش‌های یک‌ثانیه‌ای سنگین نشود. اگر بیش از `Agent offline after` ثانیه گزارش نرسد، قانون `agent_offline` اجرا می‌شود.
 
@@ -551,6 +593,7 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 
 در فرم مانیتور پروکسی:
 
+- **اجرای تست از** را انتخاب کنید: پنل اصلی یا یک ایجنت آنلاین. برای تست از شبکهٔ ایران، ایجنت همان سرور را انتخاب کنید.
 - **هندشیک واقعی با Xray** روشن باشد (پیش‌فرض).
 - **آدرس تست اتصال** را وارد کنید؛ پیش‌فرض `https://www.gstatic.com/generate_204` است. این آدرس باید از سمت سرور پروکسی قابل دسترس باشد و کد 2xx/3xx برگرداند.
 - **حداکثر کانفیگ برای تست واقعی** را برای سابسکریپشن‌های بزرگ محدود کنید (پیش‌فرض ۱۰ کانفیگ).
@@ -586,7 +629,9 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 | `POST` | `/api/agents/{id}/rotate` | توکن جدید |
 | `GET` | `/api/agents/{id}/metrics` | نمودار منابع (`?hours=24`) |
 | `GET` | `/api/agent/hello` | هندشیک REST ایجنت — هدر `X-Agent-Token` یا `Authorization: Bearer` |
-| `POST` | `/api/agent/report` | گزارش ایجنت — REST/JSON با همان هدر توکن |
+| `POST` | `/api/agent/report` | گزارش ایجنت — REST/JSON با همان هدر توکن (fallback) |
+| `GET` | `/api/agent/link` | ارتقای WebSocket برای stream زندهٔ ایجنت (fallback) |
+| `POST` | `/pulse.agent.v1.AgentLink/Connect` | stream دوطرفهٔ gRPC ایجنت (JSON codec، هدر توکن در metadata) |
 | `GET` | `/api/cloudflare/status` / `zones` / `records` | وضعیت و داده‌های Cloudflare |
 | `POST` | `/api/cloudflare/update` | تغییر رکورد |
 | `GET/PUT` | `/api/settings` | تنظیمات (توکن‌ها بازخوانی نمی‌شوند) |
@@ -613,12 +658,15 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
     "group": "عمومی",
     "interval_sec": 60,
     "timeout_ms": 12000,
+    "probe_agent_id": 0,
     "enabled": true,
     "config": {"expected_status": "2xx", "follow_redirects": true},
     "fail_threshold": 2,
     "recover_threshold": 1
   }'
 ```
+
+`probe_agent_id: 0` یعنی تست از خود پنل انجام شود؛ برای اجرای تست از یک ایجنت، شناسهٔ آن را از `/api/agents` بگذارید. اگر ایجنت آفلاین باشد، نتیجه به‌صورت `degraded` با خطای اتصال ثبت می‌شود.
 
 ---
 
@@ -667,6 +715,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 | `PULSE_AGENT_NAME` | hostname | نام نمایشی |
 | `PULSE_AGENT_SERVICES` | — | سرویس‌های systemd با کاما جدا‌شده |
 | `PULSE_AGENT_WG` | `true` | جمع‌آوری WireGuard |
+| `PULSE_XRAY_BIN` | `xray` | مسیر باینری Xray برای تست کانفیگ از ایجنت |
 
 فلگ‌های خط فرمان بر محیط اولویت دارند (`--addr`, `--db`).
 
@@ -674,7 +723,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.4.4` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.5.0` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -713,8 +762,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.4.4
-git push origin v1.4.4
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 ---
@@ -735,6 +784,9 @@ git push origin v1.4.4
 | Xray شناسایی نمی‌شود | با `xray version` از اجرای باینری مطمئن شوید، مسیر را در تنظیمات وارد کنید و «بررسی مجدد» را بزنید. در Docker، نسخهٔ Xray داخل تصویر نصب می‌شود. |
 | تست واقعی پروکسی ناموفق است | UUID/رمز/Reality، SNI و شبکه را بررسی کنید. URL تست باید از سمت سرور پروکسی در دسترس باشد. اگر پنل بدون Xray اجرا شود، مانیتور به‌جای سبز کاذب، وضعیت هشدار می‌گیرد. |
 | تست واقعی زمان‌بر است | تعداد «حداکثر کانفیگ برای تست واقعی» یا فاصلهٔ بررسی را کم/زیاد کنید؛ هر کانفیگ یک پروسهٔ Xray موقت دارد. |
+| مانیتور با «اتصال زندهٔ ایجنت برقرار نیست» هشدار می‌دهد | در صفحهٔ سرورها transport ایجنت را ببینید؛ ایجنت باید نسخهٔ ۱.۵+ و آنلاین باشد. اگر REST است، gRPC/WebSocket در reverse proxy مسدود است؛ بلوک gRPC در Caddyfile یا WebSocket headers در Nginx را اضافه کنید. |
+| «تست از ایجنت» انجام می‌شود ولی هندشیک Xray ندارد | روی ایجنت `xray version` را اجرا کنید و `PULSE_XRAY_BIN` را تنظیم کنید. نصب‌کنندهٔ جدید ایجنت Xray رسمی را نصب می‌کند؛ برای ایجنت قدیمی با همان دستور نصب دوباره اجرا کنید. |
+| آمار زنده با تأخیر می‌رسد | ترافیک باید هر ۱ ثانیه باشد؛ transport کارت سرور را بررسی کنید. اگر REST است، ایجنت به fallback رفته و اتصال gRPC/WebSocket را برقرار کنید. |
 | ساخت Docker در دانلود Xray خطا می‌دهد | `XRAY_DOWNLOAD_URL` را به یک آینهٔ معتبر از فایل ZIP همان معماری تنظیم کنید، یا پالس را بدون Docker روی هاستی با Xray نصب‌شده اجرا کنید. |
 | نصب‌کننده ریلیز پیدا نمی‌کند | نصب‌کننده به‌صورت خودکار از سورس با Go رسمی می‌سازد. برای نصب سریع‌تر یک تگ بسازید یا از `--release`/`--binary`/`--binary-url` استفاده کنید. |
 | دانلود از GitHub یا go.dev مسدود است | از `--binary-url` با یک میرور معتبر، `GOPROXY` مناسب، یا `XRAY_DOWNLOAD_URL` استفاده کنید. |

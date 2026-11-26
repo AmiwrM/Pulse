@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -14,7 +16,11 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/soheilhy/cmux"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
+	"pulse/internal/agentproto"
 	"pulse/internal/checker"
 	"pulse/internal/cloudflare"
 	"pulse/internal/config"
@@ -44,6 +50,8 @@ type App struct {
 	hub    *Hub
 	probes *checker.Manager
 	xray   *xray.Engine
+	links  *agentLinkHub
+	grpc   *grpc.Server
 
 	confMu sync.RWMutex
 	conf   *config.Settings
@@ -56,6 +64,10 @@ type App struct {
 
 	notifyMu   sync.Mutex
 	notifyLast map[string]time.Time
+
+	presenceMu sync.Mutex
+	linkSeen   map[int64]bool
+	restSeen   map[int64]int64
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -105,12 +117,22 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		hub:        newHub(),
 		probes:     probes,
 		xray:       xrayEngine,
+		links:      newAgentLinkHub(),
 		conf:       conf,
 		start:      time.Now(),
 		running:    map[int64]bool{},
 		slots:      make(chan struct{}, 20),
 		notifyLast: map[string]time.Time{},
+		linkSeen:   map[int64]bool{},
+		restSeen:   map[int64]int64{},
 	}
+	a.grpc = grpc.NewServer(
+		grpc.MaxRecvMsgSize(16<<20),
+		grpc.MaxSendMsgSize(16<<20),
+		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 5 * time.Second, PermitWithoutStream: true}),
+	)
+	agentproto.RegisterServer(a.grpc, a)
 	return a, nil
 }
 
@@ -149,6 +171,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/agent/hello", a.handleAgentHello)
 	mux.HandleFunc("POST /api/agent/report", a.handleAgentReport)
+	mux.HandleFunc("GET /api/agent/link", a.handleAgentLinkWS)
 
 	mux.HandleFunc("GET /api/stream", a.requireAuth(a.handleStream))
 	mux.HandleFunc("GET /api/summary", a.requireAuth(a.handleSummary))
@@ -516,6 +539,13 @@ func (a *App) recoverer(next http.Handler) http.Handler {
 
 func (a *App) Run(ctx context.Context) error {
 	go a.scheduler(ctx)
+	listener, err := net.Listen("tcp", a.cfg.Addr)
+	if err != nil {
+		return err
+	}
+	m := cmux.New(listener)
+	grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldPrefixSendSettings("content-type", "application/grpc"))
+	httpL := m.Match(cmux.Any())
 	srv := &http.Server{
 		Addr:              a.cfg.Addr,
 		Handler:           a.Handler(),
@@ -524,20 +554,44 @@ func (a *App) Run(ctx context.Context) error {
 		WriteTimeout:      0,
 		IdleTimeout:       90 * time.Second,
 	}
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 3)
 	go func() {
-		a.logger.Info("pulse is listening", "addr", a.cfg.Addr, "version", a.cfg.Version)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+		if err := a.grpc.Serve(grpcL); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			errCh <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
+	go func() {
+		if err := srv.Serve(httpL); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("http: %w", err)
+		}
+	}()
+	go func() {
+		if err := m.Serve(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errCh <- fmt.Errorf("cmux: %w", err)
+		}
+	}()
+	a.logger.Info("pulse is listening", "addr", a.cfg.Addr, "version", a.cfg.Version, "agent_link", "gRPC + WebSocket")
+
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
+		stopped := make(chan struct{})
+		go func() {
+			a.grpc.GracefulStop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(3 * time.Second):
+			a.grpc.Stop()
+		}
+		_ = listener.Close()
 		return nil
 	case err := <-errCh:
+		_ = listener.Close()
+		a.grpc.Stop()
 		return err
 	}
 }
