@@ -69,7 +69,7 @@ func TestParseProxyNodes(t *testing.T) {
 	ssUser := base64.RawURLEncoding.EncodeToString([]byte("aes-256-gcm:password"))
 	input := strings.Join([]string{
 		vmess,
-		"vless://11111111-2222-3333-4444-555555555555@vless.example.com:443?security=reality&sni=cdn.example.com&pbk=abcdef&sid=1234&fp=chrome#VLESS%20Node",
+		"vless://11111111-2222-3333-4444-555555555555@vless.example.com:443?security=reality&sni=cdn.example.com&pbk=abcdef&sid=1234&fp=chrome&encryption=mlkem768x25519plus.native.0rtt.testkey#VLESS%20Node",
 		"trojan://pass@trojan.example.com:8443?security=tls&sni=trojan.example.com#Trojan",
 		"ss://" + ssUser + "@ss.example.com:8388#SS",
 		"hysteria2://auth@hy.example.com:443#Hysteria",
@@ -90,6 +90,9 @@ func TestParseProxyNodes(t *testing.T) {
 	}
 	if nodes[1].XrayNode == nil || nodes[1].XrayNode.Security != "reality" || nodes[1].XrayNode.PublicKey == "" {
 		t.Errorf("reality real-test spec missing: %+v", nodes[1].XrayNode)
+	}
+	if nodes[1].XrayNode == nil || nodes[1].XrayNode.Encryption != "mlkem768x25519plus.native.0rtt.testkey" {
+		t.Errorf("vless encryption missing: %+v", nodes[1].XrayNode)
 	}
 	if nodes[2].Address != "trojan.example.com:8443" || !nodes[2].TLS {
 		t.Errorf("unexpected trojan node: %+v", nodes[2])

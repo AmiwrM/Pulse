@@ -482,6 +482,7 @@ func parseVLESS(line string) (ProxyNode, bool) {
 	flow := q.Get("flow")
 	fp := q.Get("fp")
 	mode := q.Get("mode")
+	encryption := q.Get("encryption")
 	pbk := firstNonEmpty(q.Get("pbk"), q.Get("publicKey"))
 	sid := firstNonEmpty(q.Get("sid"), q.Get("shortId"))
 	spx := firstNonEmpty(q.Get("spx"), q.Get("spiderX"))
@@ -499,7 +500,7 @@ func parseVLESS(line string) (ProxyNode, bool) {
 			Name: name, Protocol: "vless", Address: u.Hostname(), Port: port,
 			UUID: u.User.Username(), Flow: flow, Network: network, HeaderType: q.Get("headerType"),
 			Security: security, SNI: sni, HostHeader: hostHeader, Path: path, ServiceName: serviceName,
-			Fingerprint: fp, PublicKey: pbk, ShortID: sid, SpiderX: spx, ALPN: splitList(q.Get("alpn")), Mode: mode,
+			Fingerprint: fp, PublicKey: pbk, ShortID: sid, SpiderX: spx, ALPN: splitList(q.Get("alpn")), Mode: mode, Encryption: encryption,
 		}
 		if security == "xtls" {
 			x.Security = "tls"

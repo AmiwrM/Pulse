@@ -148,6 +148,11 @@ func Validate(monType, target string, raw json.RawMessage) error {
 		if c.Keyword != "" && c.KeywordMode != "" && c.KeywordMode != "contains" && c.KeywordMode != "not_contains" {
 			return fmt.Errorf("حالت کلیدواژه نامعتبر است")
 		}
+		switch strings.ToLower(c.KeywordScope) {
+		case "", "body", "headers", "both":
+		default:
+			return fmt.Errorf("محل جستجوی کلیدواژه نامعتبر است")
+		}
 	case "tcp":
 		if _, _, err := net.SplitHostPort(target); err != nil {
 			return fmt.Errorf("آدرس TCP باید به شکل host:port باشد")

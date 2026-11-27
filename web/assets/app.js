@@ -2178,6 +2178,7 @@ function monitorTypeFields(type, cfg = {}) {
       <div class="field"><label>کد وضعیت مورد انتظار</label><input class="input ltr" name="expected_status" value="${esc(val('expected_status', '2xx'))}" placeholder="2xx یا 200"><div class="help">مثال: 200، 2xx، 200-299</div></div>
       <div class="field"><label>کلیدواژه در پاسخ (اختیاری)</label><input class="input" name="keyword" value="${esc(val('keyword'))}" placeholder="مثلاً: welcome"></div>
       <div class="field"><label>رفتار کلیدواژه</label><select class="select" name="keyword_mode"><option value="contains" ${val('keyword_mode', 'contains') !== 'not_contains' ? 'selected' : ''}>باید وجود داشته باشد</option><option value="not_contains" ${val('keyword_mode') === 'not_contains' ? 'selected' : ''}>نباید وجود داشته باشد</option></select></div>
+      <div class="field"><label>محل جستجوی کلیدواژه</label><select class="select" name="keyword_scope"><option value="body" ${val('keyword_scope', 'body') === 'body' ? 'selected' : ''}>بدنه پاسخ</option><option value="headers" ${val('keyword_scope') === 'headers' ? 'selected' : ''}>هدرهای پاسخ</option><option value="both" ${val('keyword_scope') === 'both' ? 'selected' : ''}>بدنه + هدرها</option></select><div class="help">برای ساب‌سکریپشن‌هایی که عنوان را در هدر برمی‌گردانند، «هدرهای پاسخ» را انتخاب کنید.</div></div>
       <div class="field"><label>آستانه کندی (میلی‌ثانیه)</label><input class="input" type="number" name="slow_ms" min="0" value="${Number(val('slow_ms', 0)) || ''}" placeholder="اختیاری"></div>
       <div class="field"><label>Host Header (اختیاری)</label><input class="input ltr" name="host_header" value="${esc(val('host_header'))}" placeholder="example.com"></div>
       <div class="field full"><label>هدرهای سفارشی (JSON)</label><textarea class="textarea ltr" name="headers" rows="2" placeholder='{"Authorization": "Bearer ..."}'>${Object.keys(cfg.headers || {}).length ? esc(JSON.stringify(cfg.headers, null, 2)) : ''}</textarea></div>
@@ -2410,6 +2411,7 @@ function collectMonitorConfig(form, type) {
     cfg.expected_status = formVal(form, 'expected_status');
     cfg.keyword = formVal(form, 'keyword');
     cfg.keyword_mode = formVal(form, 'keyword_mode');
+    cfg.keyword_scope = formVal(form, 'keyword_scope') || 'body';
     cfg.follow_redirects = formChecked(form, 'follow_redirects');
     cfg.skip_tls_verify = formChecked(form, 'skip_tls_verify');
     cfg.slow_ms = Number(formVal(form, 'slow_ms')) || 0;

@@ -20,6 +20,7 @@ type httpConfig struct {
 	ExpectedStatus  string            `json:"expected_status"`
 	Keyword         string            `json:"keyword"`
 	KeywordMode     string            `json:"keyword_mode"`
+	KeywordScope    string            `json:"keyword_scope"`
 	FollowRedirects bool              `json:"follow_redirects"`
 	SkipTLSVerify   bool              `json:"skip_tls_verify"`
 	HostHeader      string            `json:"host_header"`
@@ -97,13 +98,39 @@ func (m *Manager) checkHTTP(ctx context.Context, mon model.Monitor) Result {
 	}
 
 	if c.Keyword != "" {
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		if readErr != nil {
-			res.Error = "خواندن پاسخ ناموفق: " + readErr.Error()
-			return res
+		scope := strings.ToLower(strings.TrimSpace(c.KeywordScope))
+		switch scope {
+		case "headers", "both", "body":
+		default:
+			scope = "body"
 		}
-		has := strings.Contains(string(data), c.Keyword)
+		bodyText := ""
+		if scope == "body" || scope == "both" {
+			data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+			if readErr != nil {
+				res.Error = "خواندن پاسخ ناموفق: " + readErr.Error()
+				return res
+			}
+			bodyText = string(data)
+		} else {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+		}
+		headerText := ""
+		if scope == "headers" || scope == "both" {
+			var b strings.Builder
+			for key, values := range resp.Header {
+				for _, value := range values {
+					b.WriteString(key)
+					b.WriteString(": ")
+					b.WriteString(value)
+					b.WriteString("\n")
+				}
+			}
+			headerText = b.String()
+		}
+		has := strings.Contains(bodyText+"\n"+headerText, c.Keyword)
 		meta["keyword_found"] = has
+		meta["keyword_scope"] = scope
 		if c.KeywordMode == "not_contains" {
 			if has {
 				res.Error = "کلیدواژه‌ای که نباید در پاسخ باشد، پیدا شد"

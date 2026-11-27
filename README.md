@@ -10,7 +10,13 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.6.3
+### خلاصهٔ نسخهٔ 1.6.4
+
+- پشتیبانی از **VLESS Encryption** جدید (`encryption=mlkem768x25519plus...`) در تست واقعی Xray؛ قبلاً همیشه `encryption: none` فرستاده می‌شد و این کانفیگ‌ها هندشیک نمی‌گرفتند.
+- جستجوی کلیدواژهٔ HTTP در **هدرهای پاسخ** هم اضافه شد: گزینه‌های «بدنه پاسخ»، «هدرهای پاسخ» و «بدنه + هدرها». برای ساب‌سکریپشن‌هایی که عنوان/نام را در هدر برمی‌گردانند مناسب است.
+- به‌روزرسانی کش PWA و دارایی‌های UI برای اعمال تغییرات فرم مانیتور.
+
+**تغییرات 1.6.3:**
 
 - رفع باگ `pulse update`: باینری دانلودشده دیگر نام فایل موقت را به‌جای `pulse` در خروجی `--version` چاپ نمی‌کند؛ آپدیت از نسخه‌های 1.6.0/1.6.1/1.6.2 به 1.6.3+ کار می‌کند.
 
@@ -153,8 +159,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.6.3
-git push origin v1.6.3
+git tag v1.6.4
+git push origin v1.6.4
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -167,7 +173,7 @@ git push origin v1.6.3
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.6.3 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.6.4 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -197,7 +203,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 # پنل
 pulse start | stop | restart | status
 pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
-pulse update [--release v1.6.3] [--no-restart]
+pulse update [--release v1.6.4] [--no-restart]
 pulse port                       # نمایش پورت فعلی
 pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
 pulse uninstall [--purge] [--yes]
@@ -218,8 +224,8 @@ pulse-agent version
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.6.3
-pulse-agent update --release v1.6.3
+pulse update --release v1.6.4
+pulse-agent update --release v1.6.4
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -431,7 +437,7 @@ location /pulse.agent.v1.AgentLink/ {
 
 | نوع | مثال هدف | تنظیمات مهم |
 |---|---|---|
-| HTTP | `https://example.com/health` | کد انتظار (`2xx` پیش‌فرض)، کلیدواژه، متد، هدرهای JSON، بدنه، دنبال‌کردن ریدایرکت، نادیده‌گرفتن TLS |
+| HTTP | `https://example.com/health` | کد انتظار (`2xx` پیش‌فرض)، کلیدواژه، محل جستجوی کلیدواژه (بدنه/هدرها/هردو)، متد، هدرهای JSON، بدنه، دنبال‌کردن ریدایرکت، نادیده‌گرفتن TLS |
 | TCP | `example.com:443` | مهلت بررسی |
 | ICMP | `1.1.1.1` | نصب بودن `ping` و دسترسی `NET_RAW` |
 | DNS | `example.com` | نوع رکورد، مقدار انتظار (چند مقدار با کاما) و DNS Server سفارشی |
@@ -439,6 +445,7 @@ location /pulse.agent.v1.AgentLink/ {
 | Proxy | نام ساب | متن/URL سابسکریپشن، حداقل کانفیگ سالم |
 
 - **اجرای تست از:** برای هر نوع مانیتور می‌توانید یک ایجنت را انتخاب کنید. بررسی از همان سرور و با همان مسیر شبکه انجام می‌شود؛ مناسب برای تست کانفیگ از یک نود ایران، بررسی دسترسی از یک منطقهٔ دیگر یا تفکیک خطای مقصد از خطای پنل. گزینهٔ پیش‌فرض «پنل اصلی» است. اگر ایجنت انتخاب‌شده آفلاین باشد یا اتصال زنده نداشته باشد، نتیجه به‌صورت **هشدار (degraded)** با خطای «اتصال زندهٔ ایجنت برقرار نیست» ثبت می‌شود و برای مقصد رخداد کاذب باز نمی‌شود.
+- در مانیتور HTTP، کلیدواژه می‌تواند در **بدنه پاسخ**، **هدرهای پاسخ** یا هر دو جستجو شود. برای ساب‌سکریپشن‌هایی که عنوان یا نام را در هدرهایی مثل `content-disposition` یا `profile-title` برمی‌گردانند، گزینهٔ «هدرهای پاسخ» را انتخاب کنید.
 - برای تست کانفیگ از ایجنت، Xray باید روی همان ایجنت نصب باشد. نصب‌کنندهٔ جدید ایجنت این کار را به‌صورت پیش‌فرض انجام می‌دهد؛ در صورت نصب با `--no-xray`، فقط بررسی سریع TCP/TLS انجام می‌شود.
 - **آستانه خطا** تعیین می‌کند پس از چند بررسی ناموفق، وضعیت «قطع» شود. **آستانه بازیابی** هم تعداد بررسی موفق لازم برای «سالم» شدن است؛ این دو از هشدارهای زودگذر جلوگیری می‌کنند.
 - برای هر مانیتور می‌توانید سوییچ خودکار DNS را فعال کنید (بخش Cloudflare).
@@ -810,7 +817,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.6.3` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.6.4` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -849,8 +856,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.6.3
-git push origin v1.6.3
+git tag v1.6.4
+git push origin v1.6.4
 ```
 
 ---

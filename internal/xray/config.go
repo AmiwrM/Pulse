@@ -21,6 +21,9 @@ type Node struct {
 	AlterID  int
 	Flow     string
 	User     string
+	// Encryption is the VLESS client encryption value (usually "none", but
+	// newer configs use mlkem768x25519plus...).
+	Encryption string
 
 	// Transport and TLS.
 	Network     string
@@ -95,7 +98,11 @@ func (n Node) outboundConfig() (map[string]any, error) {
 		if n.UUID == "" {
 			return nil, fmt.Errorf("UUID در کانفیگ VLESS وجود ندارد")
 		}
-		user := vlessUser{ID: n.UUID, Encryption: "none", Flow: n.Flow}
+		encryption := strings.TrimSpace(n.Encryption)
+		if encryption == "" {
+			encryption = "none"
+		}
+		user := vlessUser{ID: n.UUID, Encryption: encryption, Flow: n.Flow}
 		settings["vnext"] = []vnext{{
 			Address: n.Address, Port: n.Port, Users: []any{user},
 		}}

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.4
+
+- Pass the VLESS `encryption` value through to the generated Xray outbound.
+  Newer subscriptions use `encryption=mlkem768x25519plus...`; Pulse previously
+  always sent `encryption: none`, so those handshakes could not succeed.
+- HTTP monitors can now search the keyword in response headers, the body, or
+  both (`keyword_scope`: `body`, `headers`, `both`). This is useful for
+  subscription endpoints that expose the profile name in headers.
+- Bumped the PWA cache and asset query versions so the new monitor form is
+  loaded after an update.
+
 ## 1.6.3
 
 - Fixed `pulse update` rejecting a freshly downloaded release. The binary run
