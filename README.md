@@ -10,7 +10,7 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.8.0
+### خلاصهٔ نسخهٔ 1.8.1
 
 - **چند حساب Cloudflare** اضافه شد: افزودن، ویرایش، فعال/غیرفعال و حذف حساب‌ها، هر کدام با توکن و دامنه‌های مستقل.
 - ساخت، ویرایش و حذف **رکوردهای DNS** از داخل پنل، با پشتیبانی از A، AAAA، CNAME، TXT، MX، NS، SRV و CAA.
@@ -18,6 +18,7 @@
 - مودال‌های جزئیات مانیتور و سرور بلافاصله با اسکلت بارگذاری باز می‌شوند و داده‌ها بعد از پاسخ API جایگزین می‌شوند.
 - صفحهٔ Cloudflare ابتدا حساب‌ها را نشان می‌دهد و دامنه‌ها/رکوردها را در پس‌زمینه بارگذاری می‌کند.
 - توکن قدیمی Cloudflare به‌صورت خودکار به اولین حساب منتقل می‌شود.
+- اعلان‌های بازیابی، انقضا و منابع اگر دلیل خالی داشته باشند، دلیل خوانا و جزئیات کامل‌تری دریافت می‌کنند.
 
 **تغییرات 1.7.1:**
 
@@ -189,8 +190,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.8.0
-git push origin v1.8.0
+git tag v1.8.1
+git push origin v1.8.1
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -203,7 +204,7 @@ git push origin v1.8.0
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.8.0 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.8.1 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -233,7 +234,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 # پنل
 pulse start | stop | restart | status
 pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
-pulse update [--release v1.8.0] [--no-restart]
+pulse update [--release v1.8.1] [--no-restart]
 pulse port                       # نمایش پورت فعلی
 pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
 pulse uninstall [--purge] [--yes]
@@ -254,8 +255,8 @@ pulse-agent version
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.8.0
-pulse-agent update --release v1.8.0
+pulse update --release v1.8.1
+pulse-agent update --release v1.8.1
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -847,7 +848,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.8.0` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.8.1` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -886,8 +887,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.8.0
-git push origin v1.8.0
+git tag v1.8.1
+git push origin v1.8.1
 ```
 
 ---

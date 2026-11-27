@@ -387,6 +387,27 @@ func applyNotifyTemplate(conf *config.Settings, ev notifyEvent, title, plain, ht
 			}
 		}
 	}
+	if strings.TrimSpace(reason) == "" {
+		switch ev.Trigger {
+		case "up":
+			reason = "سرویس دوباره سالم شد"
+		case "cert_expiring":
+			reason = fmt.Sprintf("%d روز تا انقضای گواهی", int(ev.Value))
+		case "dns_mismatch":
+			reason = "مقدار DNS با مقدار مورد انتظار تفاوت دارد"
+		case "cpu_high":
+			reason = fmt.Sprintf("مصرف CPU به %.1f%% رسیده است", ev.Value)
+		case "ram_high":
+			reason = fmt.Sprintf("مصرف RAM به %.1f%% رسیده است", ev.Value)
+		case "disk_high":
+			reason = fmt.Sprintf("مصرف دیسک به %.1f%% رسیده است", ev.Value)
+		default:
+			reason = strings.TrimSpace(plain)
+		}
+	}
+	if strings.TrimSpace(details) == "" {
+		details = strings.TrimSpace(plain)
+	}
 	values := map[string]string{
 		"{event}": ev.Trigger, "{title}": title, "{emoji}": emoji,
 		"{monitor}": name, "{agent}": name, "{hostname}": hostname,

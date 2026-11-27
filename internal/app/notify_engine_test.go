@@ -36,6 +36,15 @@ func TestApplyNotifyTemplate(t *testing.T) {
 	}
 }
 
+func TestApplyNotifyTemplateRecoveryFallback(t *testing.T) {
+	conf := &config.Settings{Timezone: "UTC", NotifyBodyTemplate: "reason={reason}\ndetails={details}"}
+	mon := &model.Monitor{Name: "Main", Type: "http", Status: "up"}
+	_, plain, _ := applyNotifyTemplate(conf, notifyEvent{Trigger: "up", Monitor: mon}, "Recovered", "Main is reachable again", "")
+	if !strings.Contains(plain, "reason=سرویس دوباره سالم شد") || !strings.Contains(plain, "details=Main is reachable again") {
+		t.Fatalf("unexpected recovery fallback: %q", plain)
+	}
+}
+
 func TestApplyNotifyTemplateDefaults(t *testing.T) {
 	conf := &config.Settings{Timezone: "UTC"}
 	title, plain, htmlBody := applyNotifyTemplate(conf, notifyEvent{Trigger: "up"}, "Title", "Plain", "<b>HTML</b>")

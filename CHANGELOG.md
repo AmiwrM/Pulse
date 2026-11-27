@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.1
+
+- Recovery, certificate-expiry and resource notifications now get a readable
+  fallback reason and full incident details when the raw error is empty.
+
 ## 1.8.0
 
 - Added **multiple Cloudflare accounts** with create, edit, enable/disable and
