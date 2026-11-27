@@ -261,6 +261,28 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 			}
 		}
 	}
+	failedNodes := []string{}
+	for i := range nodes {
+		if nodes[i].OK {
+			continue
+		}
+		reason := strings.TrimSpace(nodes[i].Error)
+		if reason == "" {
+			reason = "بدون پاسخ"
+		}
+		label := strings.TrimSpace(nodes[i].Name)
+		if label == "" {
+			label = nodes[i].Address
+		}
+		failedNodes = append(failedNodes, truncate(label+": "+reason, 180))
+		if len(failedNodes) >= 8 {
+			break
+		}
+	}
+	if len(failedNodes) > 0 {
+		meta["failed_configs"] = failedNodes
+		warnings = append(warnings, "کانفیگ‌های ناموفق: "+strings.Join(failedNodes, "؛ "))
+	}
 	meta["healthy"] = healthy
 	meta["min_healthy"] = minHealthy
 	meta["nodes"] = nodes
@@ -268,6 +290,9 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 	res := Result{OK: healthy >= minHealthy, LatencyMS: minLatency, Meta: meta}
 	if !res.OK {
 		res.Error = fmt.Sprintf("تنها %d از %d کانفیگ در دسترس است (حداقل %d لازم است)", healthy, len(nodes), minHealthy)
+		if len(failedNodes) > 0 {
+			res.Error += " — " + strings.Join(failedNodes, "؛ ")
+		}
 	} else if healthy < len(nodes) {
 		warnings = append(warnings, fmt.Sprintf("%d از %d کانفیگ در دسترس نیست", len(nodes)-healthy, len(nodes)))
 	}

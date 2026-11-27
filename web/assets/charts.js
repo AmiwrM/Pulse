@@ -1,5 +1,5 @@
 /* Pulse charts — tiny dependency-free canvas charts with hover tooltips. */
-import { getLang } from './i18n.js?v=20';
+import { getLang } from './i18n.js?v=21';
 
 const isEN = () => getLang() === 'en';
 const fa = (s) => String(s);

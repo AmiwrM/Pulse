@@ -90,7 +90,7 @@ func HumanDuration(seconds int64) string {
 
 func Percent(v float64) string {
 	if v <= 0 {
-		return "۰٪"
+		return "0٪"
 	}
 	return FaDigits(fmt.Sprintf("%.1f", v)) + "٪"
 }

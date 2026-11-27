@@ -97,6 +97,12 @@ func (a *App) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if v, ok := rawString(body, "telegram_chat_id"); ok {
 		next.TelegramChatID = strings.TrimSpace(v)
 	}
+	if v, ok := rawString(body, "notify_title_template"); ok {
+		next.NotifyTitleTemplate = strings.TrimSpace(v)
+	}
+	if v, ok := rawString(body, "notify_body_template"); ok {
+		next.NotifyBodyTemplate = strings.TrimSpace(v)
+	}
 	if b, ok := rawBool(body, "webpush_enabled"); ok {
 		next.WebPushEnabled = b
 	}
@@ -219,6 +225,12 @@ func validateSettings(s *config.Settings) error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("آدرس تست واقعی Xray معتبر نیست")
 		}
+	}
+	if len([]rune(s.NotifyTitleTemplate)) > 200 {
+		return fmt.Errorf("قالب عنوان اعلان طولانی است")
+	}
+	if len([]rune(s.NotifyBodyTemplate)) > 4000 {
+		return fmt.Errorf("قالب متن اعلان طولانی است")
 	}
 	return nil
 }

@@ -107,6 +107,8 @@ func (m *Manager) Run(parent context.Context, mon model.Monitor) Result {
 		res = m.checkSSL(ctx, mon)
 	case "proxy":
 		res = m.checkProxy(ctx, mon)
+	case "vps":
+		res = m.checkVirtualizor(ctx, mon)
 	default:
 		res = Result{Error: "نوع مانیتور ناشناخته است: " + mon.Type}
 	}
@@ -199,7 +201,18 @@ func Validate(monType, target string, raw json.RawMessage) error {
 			}
 		}
 		if c.MaxRealNodes < 0 || c.MaxRealNodes > 30 {
-			return fmt.Errorf("تعداد کانفیگ‌های تست واقعی باید بین ۱ تا ۳۰ باشد")
+			return fmt.Errorf("تعداد کانفیگ‌های تست واقعی باید بین 1 تا 30 باشد")
+		}
+	case "vps":
+		var c virtualizorConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return fmt.Errorf("تنظیمات Virtualizor نامعتبر است")
+		}
+		if strings.TrimSpace(c.PanelURL) == "" || strings.TrimSpace(c.APIKey) == "" || strings.TrimSpace(c.APIPass) == "" || c.VPSID <= 0 {
+			return fmt.Errorf("آدرس پنل، API Key، API Password و VPS ID الزامی است")
+		}
+		if u, err := url.Parse(strings.TrimSpace(c.PanelURL)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("آدرس پنل Virtualizor معتبر نیست")
 		}
 	default:
 		return fmt.Errorf("نوع مانیتور ناشناخته است")

@@ -1,8 +1,8 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=20';
-import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=20';
+import { lineChart, sparkline } from './charts.js?v=21';
+import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=21';
 
 initI18n();
 
@@ -21,6 +21,7 @@ const state = {
   agentsOfflineAfter: 120,
   geoCache: {},
   settingsData: null,
+  settingsTab: 'general',
   cfStatus: null,
   cfZones: [],
   cfMonitors: [],
@@ -263,6 +264,7 @@ const TYPES = {
   dns: { label: 'رکورد DNS', short: 'DNS', icon: 'network', color: '#fbbf24' },
   ssl: { label: 'گواهی SSL', short: 'SSL', icon: 'shield', color: '#34d399' },
   proxy: { label: 'کانفیگ پروکسی', short: 'PROXY', icon: 'layers', color: '#f472b6' },
+  vps: { label: 'سرور مجازی / Virtualizor', short: 'VPS', icon: 'server', color: '#f97316' },
 };
 
 function cleanRuleName(name) {
@@ -280,6 +282,15 @@ const TRIGGERS = {
   agent_offline: { label: 'قطع ارتباط ایجنت', icon: 'wifi', tone: 'agent', desc: 'وقتی گزارش‌های یک سرور برای مدت مشخصی نرسد.' },
   dns_mismatch: { label: 'اختلاف رکورد DNS', icon: 'network', tone: 'cert', desc: 'وقتی مقدار واقعی DNS با مقدار مورد انتظار تفاوت داشته باشد.' },
 };
+
+const DEFAULT_NOTIFY_TITLE = '{emoji} {title}';
+const DEFAULT_NOTIFY_BODY = `{emoji} <b>{title}</b>
+
+🖥 <b>{monitor}</b>
+🧠 دلیل: {reason}
+📋 جزئیات: {details}
+🕒 {time}`;
+const NOTIFY_PLACEHOLDERS = ['{emoji}', '{title}', '{event}', '{monitor}', '{agent}', '{hostname}', '{type}', '{target}', '{status}', '{reason}', '{details}', '{failed_configs}', '{message}', '{value}', '{time}'];
 
 /* ------------------------------------------------------------------ API */
 class ApiError extends Error {
@@ -591,7 +602,7 @@ async function submitAuth(form) {
   err?.classList.remove('show');
   if (!username || !password) { if (err) { err.textContent = 'نام کاربری و رمز عبور الزامی است'; err.classList.add('show'); } return; }
   if (mode === 'setup' && password !== confirm) { if (err) { err.textContent = 'تکرار رمز عبور مطابقت ندارد'; err.classList.add('show'); } return; }
-  if (mode === 'setup' && password.length < 8) { if (err) { err.textContent = 'رمز عبور باید حداقل ۸ کاراکتر باشد'; err.classList.add('show'); } return; }
+  if (mode === 'setup' && password.length < 8) { if (err) { err.textContent = 'رمز عبور باید حداقل 8 کاراکتر باشد'; err.classList.add('show'); } return; }
   if (btn) { btn.disabled = true; btn.innerHTML = 'در حال بررسی…'; }
   try {
     if (mode === 'setup') await api('/api/auth/setup', { method: 'POST', body: { username, password } });
@@ -1181,7 +1192,7 @@ function renderDashboard() {
           : 'هنوز مانیتوری نساخته‌اید. یک دامنه، سرور یا کانفیگ اضافه کنید تا پالس از همین لحظه مراقبت را آغاز کند.')
         : (EN
           ? `Pulse monitored ${num(stats.total)} ${Number(stats.total) === 1 ? 'service' : 'services'} and ${num(stats.agents_total || 0)} ${Number(stats.agents_total) === 1 ? 'server' : 'servers'} in the last 24 hours.`
-          : `پالس در ۲۴ ساعت گذشته ${num(stats.total)} سرویس و ${num(stats.agents_total || 0)} سرور را زیر نظر داشته است.`);
+          : `پالس در 24 ساعت گذشته ${num(stats.total)} سرویس و ${num(stats.agents_total || 0)} سرور را زیر نظر داشته است.`);
 
   $('#view').innerHTML = `
     <section class="panel overview-panel">
@@ -1204,7 +1215,7 @@ function renderDashboard() {
             <circle class="track" cx="88" cy="88" r="74"/>
             <circle class="bar" cx="88" cy="88" r="74" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"/>
           </svg>
-          <div class="gauge-center"><b>${trend.length || monitors.length ? num(gaugePct, 1) : '—'}<small>٪</small></b><span>آپتایم ۲۴ ساعته</span></div>
+          <div class="gauge-center"><b>${trend.length || monitors.length ? num(gaugePct, 1) : '—'}<small>٪</small></b><span>آپتایم 24 ساعته</span></div>
         </div>
         <div class="gauge-caption"><span class="dot" style="background:${hasDown ? '#fb7185' : hasIssues ? '#fb923c' : '#34d399'}"></span>${hasDown ? `${num(stats.active_incidents || 0)} رخداد باز` : degradedCount ? `${num(degradedCount)} سرویس در هشدار` : 'همه سرویس‌ها پایدارند'}</div>
       </div>
@@ -1222,7 +1233,7 @@ function renderDashboard() {
         <div class="stat-foot">${num(stats.active_incidents || 0)} رخداد در جریان · ${num(stats.paused || 0)} متوقف</div>
       </div>
       <div class="panel stat-card">
-        <div class="stat-top"><span class="stat-label">آپتایم ۲۴ ساعته</span><span class="stat-ico cyan">${icon('chart')}</span></div>
+        <div class="stat-top"><span class="stat-label">آپتایم 24 ساعته</span><span class="stat-ico cyan">${icon('chart')}</span></div>
         <div class="stat-value">${trend.length || monitors.length ? num(gaugePct, 1) : '—'}<small>٪</small></div>
         <div class="stat-foot"><span class="${gaugePct >= 99 ? 'up' : 'down'}">${gaugePct >= 99 ? (EN ? 'Stable' : 'پایدار') : (EN ? 'Needs attention' : 'نیازمند توجه')}</span>${EN ? ' · Average of all monitors' : ' میانگین همه مانیتورها'}</div>
       </div>
@@ -1242,8 +1253,8 @@ function renderDashboard() {
     <div class="dash-mid">
       <div class="panel chart-panel">
         <div class="chart-head">
-          <div><div class="chart-title"><span class="live-dot"></span> روند پاسخ‌دهی</div><div class="chart-sub">میانگین تأخیر همه بررسی‌ها در ۲۴ ساعت گذشته</div></div>
-          <div class="chart-legend"><span class="chip">${num(latencyAvg)} ms ${EN ? 'average' : 'میانگین'}</span><span class="chip cyan">${EN ? '24 hours' : '۲۴ ساعت'}</span></div>
+          <div><div class="chart-title"><span class="live-dot"></span> روند پاسخ‌دهی</div><div class="chart-sub">میانگین تأخیر همه بررسی‌ها در 24 ساعت گذشته</div></div>
+          <div class="chart-legend"><span class="chip">${num(latencyAvg)} ms ${EN ? 'average' : 'میانگین'}</span><span class="chip cyan">${EN ? '24 hours' : '24 ساعت'}</span></div>
         </div>
         <div class="chart-canvas-wrap">
           <canvas id="trendChart"></canvas>
@@ -1314,7 +1325,7 @@ function monitorGridHTML() {
   const list = filteredMonitors();
   if (!list.length) {
     if (!state.monitors.length) {
-      return `<div class="panel empty" style="grid-column:1/-1"><div class="empty-ico">${icon('activity')}</div><h3>اولین مانیتور خود را بسازید</h3><p>دامنه، سرور یا کانفیگ پروکسی را اضافه کنید تا پالس هر ۶۰ ثانیه وضعیت آن را بررسی کند.</p><button class="btn btn-primary btn-sm" type="button" data-action="quick-monitor">${icon('plus')} مانیتور جدید</button></div>`;
+      return `<div class="panel empty" style="grid-column:1/-1"><div class="empty-ico">${icon('activity')}</div><h3>اولین مانیتور خود را بسازید</h3><p>دامنه، سرور یا کانفیگ پروکسی را اضافه کنید تا پالس هر 60 ثانیه وضعیت آن را بررسی کند.</p><button class="btn btn-primary btn-sm" type="button" data-action="quick-monitor">${icon('plus')} مانیتور جدید</button></div>`;
     }
     return `<div class="panel empty" style="grid-column:1/-1"><div class="empty-ico">${icon('search')}</div><h3>نتیجه‌ای پیدا نشد</h3><p>عبارت جستجو یا فیلتر وضعیت را تغییر دهید.</p><button class="btn btn-ghost btn-sm" type="button" data-action="clear-filters">پاک کردن فیلترها</button></div>`;
   }
@@ -1425,7 +1436,7 @@ async function openMonitorDetail(id, opts = {}) {
       <div class="banner-body"><b>رخداد در جریان از ${timeAgo(activeIncident.started_at)}</b><p>${esc(activeIncident.cause || m.last_error || 'در حال بررسی')} · مدت: ${duration(downSec)}</p></div>
     </div>` : ''}
     <div class="detail-stats">
-      <div class="mini-stat"><span>آپتایم ۲۴ ساعته</span><b style="color:${Number(m.uptime_24h) >= 99 ? 'var(--success-text)' : 'var(--danger-text)'}">${m.uptime_24h ? uptimePct(m.uptime_24h) : '—'}</b></div>
+      <div class="mini-stat"><span>آپتایم 24 ساعته</span><b style="color:${Number(m.uptime_24h) >= 99 ? 'var(--success-text)' : 'var(--danger-text)'}">${m.uptime_24h ? uptimePct(m.uptime_24h) : '—'}</b></div>
       <div class="mini-stat"><span>میانگین تأخیر</span><b>${m.avg_latency_ms ? num(m.avg_latency_ms) + ' ms' : '—'}</b></div>
       <div class="mini-stat"><span>آخرین بررسی</span><b style="font-size:11px">${m.last_checked_at ? timeAgo(m.last_checked_at) : 'هنوز'}</b></div>
       <div class="mini-stat"><span>گواهی SSL</span><b style="font-size:11px;color:${sslDays !== null && sslDays <= 14 ? 'var(--warning-text)' : 'var(--text-soft)'}">${sslDays === null ? '—' : sslDays < 0 ? 'منقضی' : num(sslDays) + ' روز'}</b></div>
@@ -1437,7 +1448,7 @@ async function openMonitorDetail(id, opts = {}) {
       <div style="position:relative"><canvas id="detailLatency" style="height:150px"></canvas>${chartEmpty ? `<div class="chart-empty" style="border-radius:10px">${icon('chart')}<span>داده کافی برای نمودار وجود ندارد</span></div>` : ''}</div>
     </div>
     <div class="detail-chart">
-      <div class="detail-chart-head"><b>${icon('chart')} آپتایم ۳۰ روز</b><span>${daily.length ? uptimePct(daily.reduce((s, d) => s + d.ok, 0) / Math.max(1, daily.reduce((s, d) => s + d.total, 0)) * 100) : '—'}</span></div>
+      <div class="detail-chart-head"><b>${icon('chart')} آپتایم 30 روز</b><span>${daily.length ? uptimePct(daily.reduce((s, d) => s + d.ok, 0) / Math.max(1, daily.reduce((s, d) => s + d.total, 0)) * 100) : '—'}</span></div>
       <div class="uptime-bars">
         ${bars.map((b) => {
           if (!b.row) return `<div class="u-bar" style="height:6px;background:rgba(130,160,220,.1)" data-tip="${dateShort(b.dt.getTime() / 1000)} — بدون داده"></div>`;
@@ -1463,6 +1474,24 @@ async function openMonitorDetail(id, opts = {}) {
       </tbody></table></div>
     </div>` : ''}
     ${resolved.length ? `<div class="detail-chart"><div class="detail-chart-head"><b>${icon('network')} رکورد DNS</b><span>${num(resolved.length)} مقدار</span></div><div class="service-chips">${resolved.map((v) => `<span class="chip cyan" style="direction:ltr">${esc(v)}</span>`).join('')}</div></div>` : ''}
+    ${meta.provider === 'virtualizor' ? (() => {
+      const used = Number(meta.used_gb) || 0;
+      const limit = Number(meta.limit_gb) || 0;
+      const remaining = Number(meta.remaining_gb) || 0;
+      const pct = clamp(Number(meta.percent) || 0, 0, 100);
+      const state = meta.traffic_state === 'critical' ? ['red', 'بحرانی'] : meta.traffic_state === 'warning' ? ['amber', 'هشدار'] : ['green', 'عادی'];
+      const power = meta.suspended ? 'معلق (Suspend)' : String(meta.status) === '1' ? 'روشن' : 'خاموش';
+      return `<div class="detail-chart">
+        <div class="detail-chart-head"><b>${icon('server')} ترافیک و وضعیت Virtualizor</b><span><span class="chip ${power === 'روشن' ? 'green' : 'red'}">${esc(power)}</span> <span class="chip ${state[0]}">${state[1]}</span></span></div>
+        <div class="detail-stats">
+          <div class="mini-stat"><span>ترافیک مصرفی</span><b>${nf1.format(used)} GB${limit > 0 ? ` از ${num(limit)} GB` : ''}</b></div>
+          <div class="mini-stat"><span>ترافیک باقی‌مانده</span><b style="color:${pct >= 95 ? 'var(--danger-text)' : pct >= 80 ? 'var(--warning-text)' : 'var(--success-text)'}">${limit > 0 ? `${nf1.format(remaining)} GB` : 'نامحدود'}</b></div>
+          <div class="mini-stat"><span>دریافت / ارسال</span><b style="font-size:11px">${bytes(meta.net_in || 0)} / ${bytes(meta.net_out || 0)}</b></div>
+          <div class="mini-stat"><span>VPS ID</span><b>${esc(String(meta.vps_id || '—'))}</b></div>
+        </div>
+        <div class="node-health"><div class="node-health-bar"><span style="width:${pct}%;background:${pct >= 95 ? '#fb7185' : pct >= 80 ? '#fbbf24' : '#34d399'}"></span></div><span>${limit > 0 ? `${nf1.format(pct)}٪ از سهمیهٔ ماهانه مصرف شده` : 'سهمیهٔ ترافیک نامحدود است'}</span></div>
+      </div>`;
+    })() : ''}
     <div class="detail-chart">
       <div class="detail-chart-head"><b>${icon('info')} مشخصات</b><span>${last ? dateTime(last.at) : ''}</span></div>
       <div class="form-grid">
@@ -1512,8 +1541,8 @@ function renderIncidents() {
   $('#view').innerHTML = `
     <div class="stat-grid" style="margin-top:0">
       <div class="panel stat-card"><div class="stat-top"><span class="stat-label">رخدادهای باز</span><span class="stat-ico red">${icon('alert')}</span></div><div class="stat-value">${num(active.length)}<small>در جریان</small></div><div class="stat-foot">${active.length ? 'نیازمند بررسی' : 'همه سرویس‌ها پایدارند'}</div></div>
-      <div class="panel stat-card"><div class="stat-top"><span class="stat-label">رخداد ۲۴ ساعت</span><span class="stat-ico amber">${icon('clock')}</span></div><div class="stat-value">${num(today.length)}<small>رخداد</small></div><div class="stat-foot">شامل ${num(today.filter((i) => !i.ended_at).length)} مورد باز</div></div>
-      <div class="panel stat-card"><div class="stat-top"><span class="stat-label">زمان قطعی ۲۴ ساعت</span><span class="stat-ico violet">${icon('activity')}</span></div><div class="stat-value" style="font-size:20px">${duration(downtime)}</div><div class="stat-foot">مجموع مدت رخدادها</div></div>
+      <div class="panel stat-card"><div class="stat-top"><span class="stat-label">رخداد 24 ساعت</span><span class="stat-ico amber">${icon('clock')}</span></div><div class="stat-value">${num(today.length)}<small>رخداد</small></div><div class="stat-foot">شامل ${num(today.filter((i) => !i.ended_at).length)} مورد باز</div></div>
+      <div class="panel stat-card"><div class="stat-top"><span class="stat-label">زمان قطعی 24 ساعت</span><span class="stat-ico violet">${icon('activity')}</span></div><div class="stat-value" style="font-size:20px">${duration(downtime)}</div><div class="stat-foot">مجموع مدت رخدادها</div></div>
       <div class="panel stat-card"><div class="stat-top"><span class="stat-label">تاریخچه کل</span><span class="stat-ico green">${icon('check')}</span></div><div class="stat-value">${num(resolved.length)}<small>بازیابی</small></div><div class="stat-foot">از ابتدای پایش</div></div>
     </div>
     <div class="section-head">
@@ -1805,7 +1834,7 @@ function renderServers() {
       <button class="btn btn-primary" type="button" data-action="new-agent">${icon('plus')} افزودن سرور</button>
     </div>
     ${agents.length ? `<div class="agent-grid">${agents.slice().sort((a, b) => Number(statusFromAgent(b)) - Number(statusFromAgent(a)) || a.name.localeCompare(b.name, 'fa')).map(agentCard).join('')}</div>` : `<div class="panel empty" style="margin-top:8px">
-      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر ۱ ثانیه از طریق اتصال زنده به پالس گزارش شود.</p>
+      <div class="empty-ico">${icon('agent')}</div><h3>منابع سرورها را زنده ببینید</h3><p>یک ایجنت سبک روی سرور نصب کنید تا CPU، RAM، دیسک، وضعیت سرویس‌ها و WireGuard هر 1 ثانیه از طریق اتصال زنده به پالس گزارش شود.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px"><button class="btn btn-primary btn-sm" type="button" data-action="new-agent">${icon('plus')} ساخت ایجنت</button><button class="btn btn-sm" type="button" data-action="agent-guide">${icon('terminal')} نصب یک‌خطی</button></div>
     </div>`}
     <div class="banner" style="margin-top:16px">
@@ -2109,11 +2138,25 @@ function renderNotifications() {
       <div class="quiet-grid">
         <div class="field"><label>شروع سکوت</label><input class="input ltr" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" name="start" value="${esc(s.quiet_start || '00:00')}" placeholder="HH:MM"></div>
         <div class="field"><label>پایان سکوت</label><input class="input ltr" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" name="end" value="${esc(s.quiet_end || '07:00')}" placeholder="HH:MM"></div>
-        <div class="field"><label>تکرار هشدار قطعی (دقیقه)</label><input class="input" type="number" min="0" max="10080" name="repeat" value="${Number(s.notify_repeat_min) || 0}"><div class="help">۰ = بدون تکرار</div></div>
+        <div class="field"><label>تکرار هشدار قطعی (دقیقه)</label><input class="input" type="number" min="0" max="10080" name="repeat" value="${Number(s.notify_repeat_min) || 0}"><div class="help">0 = بدون تکرار</div></div>
         <div class="field full"><label class="check-row"><input type="checkbox" name="critical" ${s.quiet_allow_critical ? 'checked' : ''}> هشدارهای حیاتی (قطعی) در ساعات سکوت هم ارسال شوند</label></div>
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn btn-primary btn-sm" type="submit">${icon('check')} ذخیره تنظیمات</button></div>
       <div class="form-error"></div>
+    </form>
+
+    <form class="panel settings-card" data-form="notify-template" style="margin-top:16px">
+      <h2>${icon('send')} قالب اعلان سفارشی <span class="chip violet" style="margin-inline-start:auto">Template</span></h2>
+      <div class="settings-desc">همین قالب برای تلگرام، Web Push و بدنهٔ وب‌هوک استفاده می‌شود. جای‌نگهدارها با اطلاعات واقعی رخداد جایگزین می‌شوند.</div>
+      <div class="form-grid">
+        <div class="field full"><label>عنوان اعلان</label><input class="input ltr" name="title_template" value="${esc(s.notify_title_template || DEFAULT_NOTIFY_TITLE)}" placeholder="{emoji} {title}"></div>
+        <div class="field full"><label>متن اعلان</label><textarea class="textarea ltr" name="body_template" rows="8" spellcheck="false">${esc(s.notify_body_template || DEFAULT_NOTIFY_BODY)}</textarea></div>
+      </div>
+      <div class="service-chips" style="margin-top:2px">${NOTIFY_PLACEHOLDERS.map((p) => `<button class="chip" type="button" data-action="notify-placeholder" data-value="${esc(p)}" style="cursor:pointer">${esc(p)}</button>`).join('')}</div>
+      <div class="tiny-label" style="margin-top:6px">پیش‌نمایش</div>
+      <pre class="code-block" id="notify-template-preview" style="max-height:160px"></pre>
+      <div class="form-error"></div>
+      <div style="display:flex;justify-content:flex-end;gap:6px"><button class="btn btn-sm btn-ghost" type="button" data-action="notify-template-reset">بازگردانی پیش‌فرض</button><button class="btn btn-sm btn-primary" type="submit">${icon('check')} ذخیره قالب</button></div>
     </form>
 
     <div class="section-head"><div><h2><span class="dot-mark"></span> سابقه ارسال</h2><p>آخرین ${num(state.notifications.length)} اعلان ثبت‌شده</p></div><a class="btn btn-sm btn-ghost" href="#/rules">مدیریت قوانین ${icon('chevron')}</a></div>
@@ -2123,6 +2166,34 @@ function renderNotifications() {
       </tbody></table></div>` : `<div class="empty" style="padding:24px"><div class="empty-ico" style="width:46px;height:46px">${icon('bell')}</div><h3>هنوز اعلانی ارسال نشده</h3><p>با فعال‌سازی کانال‌ها و وقوع رویداد، سابقه اینجا نمایش داده می‌شود.</p></div>`}
     </div>`;
   wireLabels($('#view'));
+  bindNotifyTemplateEditor();
+}
+
+function notifyTemplatePreview(form) {
+  if (!form) return;
+  const titleEl = form.elements.namedItem('title_template');
+  const bodyEl = form.elements.namedItem('body_template');
+  const preview = $('#notify-template-preview');
+  if (!preview) return;
+  const sample = {
+    '{emoji}': '🟡', '{title}': 'هشدار سرویس: مثال', '{event}': 'degraded',
+    '{monitor}': 'ساب اصلی', '{agent}': 'ساب اصلی', '{hostname}': 'vps-1',
+    '{type}': 'پروکسی', '{target}': 'sub.example.com', '{status}': 'هشدار',
+    '{reason}': '2 کانفیگ از 13 کانفیگ در دسترس نیست', '{details}': 'Germany - Tun: handshake timeout',
+    '{failed_configs}': 'Germany - Tun: handshake timeout', '{message}': 'پیام کامل و اصلی رخداد', '{value}': '91.2', '{time}': '2026/11/27 - 13:30',
+  };
+  const render = (value) => String(value || '').replace(/\{[a-z_]+\}/g, (m) => sample[m] ?? m);
+  const title = render(titleEl?.value || DEFAULT_NOTIFY_TITLE);
+  const body = render(bodyEl?.value || DEFAULT_NOTIFY_BODY).replace(/<[^>]+>/g, '');
+  preview.textContent = `${title}\n\n${body}`;
+}
+
+function bindNotifyTemplateEditor() {
+  const form = $('#view form[data-form="notify-template"]');
+  if (!form) return;
+  const update = () => notifyTemplatePreview(form);
+  form.addEventListener('input', update);
+  update();
 }
 
 /* ------------------------------------------------------------------ settings */
@@ -2133,42 +2204,61 @@ function renderSettings() {
   const xr = data.xray || {};
   const initials = userNameInitial();
   const zones = ['Asia/Tehran', 'Asia/Dubai', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'UTC'];
+  const tab = state.settingsTab || 'general';
+  const tabs = [['general', 'عمومی', 'sliders'], ['xray', 'Xray Core', 'layers'], ['system', 'سیستم', 'activity']];
   $('#view').innerHTML = `
-    <div class="settings-grid">
-      <div style="display:flex;flex-direction:column;gap:16px">
-        <div class="panel settings-card">
-          <h2>${icon('user')} حساب کاربری</h2>
-          <div class="account-row"><div class="account-avatar">${initials}</div><div class="account-info"><b>${esc(state.auth?.username || 'admin')}</b><span>مدیر سامانه · نشست فعال</span></div><div style="margin-inline-start:auto;display:flex;gap:6px"><button class="btn btn-sm" type="button" data-action="change-password">${icon('key')} تغییر رمز</button><button class="btn btn-sm btn-danger" type="button" data-action="logout">${icon('logout')} خروج</button></div></div>
-        </div>
-        <form class="panel settings-card" data-form="settings-general">
-          <h2>${icon('sliders')} تنظیمات عمومی</h2>
-          <div class="settings-desc">پیکربندی پایه سامانه، دامنه عمومی و نگه‌داری داده‌ها.</div>
-          <div class="form-grid">
-            <div class="field"><label>عنوان سامانه</label><input class="input" name="site_title" value="${esc(s.site_title || 'پالس')}" required></div>
-            <div class="field"><label>منطقه زمانی</label><input class="input ltr" name="timezone" list="tz-list" value="${esc(s.timezone || 'Asia/Tehran')}"><datalist id="tz-list">${zones.map((z) => `<option value="${z}">`).join('')}</datalist></div>
-            <div class="field full"><label>آدرس عمومی سامانه</label><input class="input ltr" name="public_base_url" value="${esc(s.public_base_url || '')}" placeholder="https://status.example.com"><div class="help">برای Web Push و ساخت فرمان نصب ایجنت، HTTPS توصیه می‌شود.</div></div>
-            <div class="field"><label>DNS Resolver</label><input class="input ltr" name="dns_resolver" value="${esc(s.dns_resolver || '1.1.1.1:53')}" placeholder="1.1.1.1:53"></div>
-            <div class="field"><label>آستانه آفلاین ایجنت (ثانیه)</label><input class="input" type="number" min="60" max="3600" name="agent_offline_after_sec" value="${Number(s.agent_offline_after_sec) || 120}"></div>
-            <div class="field"><label>نگه‌داری تاریخچه بررسی (روز)</label><input class="input" type="number" min="1" max="365" name="check_retention_days" value="${Number(s.check_retention_days) || 14}"></div>
-            <div class="field"><label>نگه‌داری نمودار سرورها (روز)</label><input class="input" type="number" min="1" max="365" name="metrics_retention_days" value="${Number(s.metrics_retention_days) || 30}"></div>
-            <div class="field full"><label>لینک دانلود ایجنت</label><input class="input ltr" name="agent_download_url" value="${esc(s.agent_download_url || '')}" placeholder="https://github.com/AmiwrM/Pulse/releases/latest/download/pulse-linux-amd64"><div class="help">پیش‌فرض از ریلیز رسمی همین ریپو برای معماری پنل استفاده می‌شود. برای ایجنت‌های ARM یا میرور، آدرس را تغییر دهید.</div></div>
+    <div class="settings-tabs" role="tablist">
+      ${tabs.map(([key, label, ico]) => `<button type="button" class="settings-tab ${tab === key ? 'active' : ''}" data-action="settings-tab" data-tab="${key}" role="tab" aria-selected="${tab === key}">${icon(ico)} ${label}</button>`).join('')}
+    </div>
+    <div class="settings-pane ${tab === 'general' ? '' : 'hidden'}" data-settings-pane="general">
+      <div class="settings-grid">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="panel settings-card">
+            <h2>${icon('user')} حساب کاربری</h2>
+            <div class="account-row"><div class="account-avatar">${initials}</div><div class="account-info"><b>${esc(state.auth?.username || 'admin')}</b><span>مدیر سامانه · نشست فعال</span></div><div style="margin-inline-start:auto;display:flex;gap:6px"><button class="btn btn-sm" type="button" data-action="change-password">${icon('key')} تغییر رمز</button><button class="btn btn-sm btn-danger" type="button" data-action="logout">${icon('logout')} خروج</button></div></div>
           </div>
-          <div class="form-error"></div>
-          <div style="display:flex;justify-content:flex-end"><button class="btn btn-primary btn-sm" type="submit">${icon('check')} ذخیره تنظیمات</button></div>
-        </form>
-        <div class="panel settings-card">
-          <h2>${icon('database')} نسخه پشتیبان</h2>
-          <div class="settings-desc">خروجی JSON از مانیتورها، قوانین، ایجنت‌ها و تنظیمات (بدون توکن‌ها و رمزها).</div>
-          <div class="backup-box">${icon('database')}<div><b>پشتیبان کامل پیکربندی</b><span>ذخیره روی سیستم شما</span></div><button class="btn btn-sm" type="button" data-action="download-backup">${icon('download')} دانلود</button></div>
-          ${state.installPrompt ? `<div class="backup-box">${icon('smartphone')}<div><b>نصب پالس روی دستگاه</b><span>دسترسی سریع و اعلان پایدار</span></div><button class="btn btn-sm btn-soft" type="button" data-action="install-pwa">${icon('download')} نصب</button></div>` : ''}
+          <form class="panel settings-card" data-form="settings-general">
+            <h2>${icon('sliders')} تنظیمات عمومی</h2>
+            <div class="settings-desc">پیکربندی پایه سامانه، دامنه عمومی و نگه‌داری داده‌ها.</div>
+            <div class="form-grid">
+              <div class="field"><label>عنوان سامانه</label><input class="input" name="site_title" value="${esc(s.site_title || 'پالس')}" required></div>
+              <div class="field"><label>منطقه زمانی</label><input class="input ltr" name="timezone" list="tz-list" value="${esc(s.timezone || 'Asia/Tehran')}"><datalist id="tz-list">${zones.map((z) => `<option value="${z}">`).join('')}</datalist></div>
+              <div class="field full"><label>آدرس عمومی سامانه</label><input class="input ltr" name="public_base_url" value="${esc(s.public_base_url || '')}" placeholder="https://status.example.com"><div class="help">برای Web Push و ساخت فرمان نصب ایجنت، HTTPS توصیه می‌شود.</div></div>
+              <div class="field"><label>DNS Resolver</label><input class="input ltr" name="dns_resolver" value="${esc(s.dns_resolver || '1.1.1.1:53')}" placeholder="1.1.1.1:53"></div>
+              <div class="field"><label>آستانه آفلاین ایجنت (ثانیه)</label><input class="input" type="number" min="60" max="3600" name="agent_offline_after_sec" value="${Number(s.agent_offline_after_sec) || 120}"></div>
+              <div class="field"><label>نگه‌داری تاریخچه بررسی (روز)</label><input class="input" type="number" min="1" max="365" name="check_retention_days" value="${Number(s.check_retention_days) || 14}"></div>
+              <div class="field"><label>نگه‌داری نمودار سرورها (روز)</label><input class="input" type="number" min="1" max="365" name="metrics_retention_days" value="${Number(s.metrics_retention_days) || 30}"></div>
+              <div class="field full"><label>لینک دانلود ایجنت</label><input class="input ltr" name="agent_download_url" value="${esc(s.agent_download_url || '')}" placeholder="https://github.com/AmiwrM/Pulse/releases/latest/download/pulse-linux-amd64"><div class="help">پیش‌فرض از ریلیز رسمی همین ریپو برای معماری پنل استفاده می‌شود. برای ایجنت‌های ARM یا میرور، آدرس را تغییر دهید.</div></div>
+            </div>
+            <div class="form-error"></div>
+            <div style="display:flex;justify-content:flex-end"><button class="btn btn-primary btn-sm" type="submit">${icon('check')} ذخیره تنظیمات</button></div>
+          </form>
+          <div class="panel settings-card">
+            <h2>${icon('database')} نسخه پشتیبان</h2>
+            <div class="settings-desc">خروجی JSON از مانیتورها، قوانین، ایجنت‌ها و تنظیمات (بدون توکن‌ها و رمزها).</div>
+            <div class="backup-box">${icon('database')}<div><b>پشتیبان کامل پیکربندی</b><span>ذخیره روی سیستم شما</span></div><button class="btn btn-sm" type="button" data-action="download-backup">${icon('download')} دانلود</button></div>
+            ${state.installPrompt ? `<div class="backup-box">${icon('smartphone')}<div><b>نصب پالس روی دستگاه</b><span>دسترسی سریع و اعلان پایدار</span></div><button class="btn btn-sm btn-soft" type="button" data-action="install-pwa">${icon('download')} نصب</button></div>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="panel settings-card">
+            <h2>${icon('shield')} امنیت و سلامت</h2>
+            <div class="kv"><span>HTTPS</span><b>${requestSecure() ? 'فعال' : (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'لوکال (HTTP)' : 'غیرفعال (HTTP)')}</b></div>
+            <div class="kv"><span>Web Push</span><b>${data.push_subscriptions ? num(data.push_subscriptions) + ' مشترک' : 'ثبت نشده'}</b></div>
+            <div class="kv"><span>کلادفلر</span><b>${data.cloudflare_configured ? 'پیکربندی شده' : 'متصل نیست'}</b></div>
+            <div class="kv"><span>تلگرام</span><b>${data.telegram_configured ? 'پیکربندی شده' : 'متصل نیست'}</b></div>
+            <div class="warning-note">${icon('shield')} <div>برای دسترسی از خارج، پنل را پشت HTTPS (Caddy/Nginx) قرار دهید و رمز قوی استفاده کنید.</div></div>
+          </div>
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:16px">
+    </div>
+    <div class="settings-pane ${tab === 'xray' ? '' : 'hidden'}" data-settings-pane="xray">
+      <div class="settings-grid" style="grid-template-columns:1fr">
         <div class="panel settings-card">
           <h2>${icon('layers')} هستهٔ Xray <span class="chip ${xr.available ? 'green' : 'amber'}" style="margin-inline-start:auto">${xr.available ? 'آماده' : 'شناسایی نشده'}</span></h2>
           <div class="settings-desc">برای تست واقعی کانفیگ‌ها، پالس یک هستهٔ موقت Xray با SOCKS محلی اجرا می‌کند و از داخل تونل یک درخواست HTTP واقعی می‌فرستد.</div>
           <div class="kv"><span>نسخه</span><b>${xr.version ? 'Xray ' + fa(xr.version) : '—'}</b></div>
-          <div class="kv"><span>مسیر شناسایی‌شده</span><b style="font-size:8.5px;max-width:190px;overflow:hidden;text-overflow:ellipsis;direction:ltr">${esc(xr.path || '—')}</b></div>
+          <div class="kv"><span>مسیر شناسایی‌شده</span><b style="font-size:8.5px;max-width:300px;overflow:hidden;text-overflow:ellipsis;direction:ltr">${esc(xr.path || '—')}</b></div>
           <div class="kv"><span>آخرین بررسی</span><b style="font-size:9px">${xr.checked_at ? timeAgo(xr.checked_at) : '—'}</b></div>
           ${xr.available ? '' : `<div class="warning-note">${icon('alert')} <div>${esc(xr.error || 'هستهٔ Xray پیدا نشد')} — نصب: <code>sudo bash install.sh --force-xray</code> یا مسیر باینری را وارد کنید.</div></div>`}
           <div class="service-chips"><span class="chip violet">VMess</span><span class="chip violet">VLESS</span><span class="chip violet">Trojan</span><span class="chip violet">Shadowsocks</span><span class="chip violet">WireGuard</span></div>
@@ -2182,10 +2272,14 @@ function renderSettings() {
           </form>
           <div class="help">نسخهٔ تست‌شده: Xray v26.11.9. نصب‌کننده یا Docker آن را نصب می‌کند؛ برای به‌روزرسانی دوباره install.sh را با <code>--force-xray</code> اجرا کنید.</div>
         </div>
+      </div>
+    </div>
+    <div class="settings-pane ${tab === 'system' ? '' : 'hidden'}" data-settings-pane="system">
+      <div class="settings-grid">
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.6.0')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.7.1')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -2199,14 +2293,6 @@ function renderSettings() {
           <div style="display:flex;flex-direction:column;gap:2px">
             ${(state.audit || []).length ? state.audit.map((a) => `<div class="kv"><span style="font-size:9px">${esc(a.action)} · ${esc(a.actor)}</span><b style="font-size:8.5px;color:var(--faint)">${timeAgo(a.at)}</b></div>`).join('') : '<div class="help">فعالیتی ثبت نشده است.</div>'}
           </div>
-        </div>
-        <div class="panel settings-card">
-          <h2>${icon('shield')} امنیت و سلامت</h2>
-          <div class="kv"><span>HTTPS</span><b>${requestSecure() ? 'فعال' : (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'لوکال (HTTP)' : 'غیرفعال (HTTP)')}</b></div>
-          <div class="kv"><span>Web Push</span><b>${data.push_subscriptions ? num(data.push_subscriptions) + ' مشترک' : 'ثبت نشده'}</b></div>
-          <div class="kv"><span>کلادفلر</span><b>${data.cloudflare_configured ? 'پیکربندی شده' : 'متصل نیست'}</b></div>
-          <div class="kv"><span>تلگرام</span><b>${data.telegram_configured ? 'پیکربندی شده' : 'متصل نیست'}</b></div>
-          <div class="warning-note">${icon('shield')} <div>برای دسترسی از خارج، پنل را پشت HTTPS (Caddy/Nginx) قرار دهید و رمز قوی استفاده کنید.</div></div>
         </div>
       </div>
     </div>`;
@@ -2247,7 +2333,7 @@ function monitorTypeFields(type, cfg = {}) {
     return `<div class="field"><label>Server Name / SNI (اختیاری)</label><input class="input ltr" name="server_name" value="${esc(val('server_name'))}" placeholder="example.com"></div>
       <div class="field"><label>هشدار چند روز قبل از انقضا</label><input class="input" type="number" min="1" max="365" name="warn_days" value="${Number(val('warn_days', 14)) || 14}"></div>
       <div class="field full"><label class="check-row"><input type="checkbox" name="skip_verify" ${checked('skip_verify') ? 'checked' : ''}> نادیده گرفتن اعتبار گواهی (فقط بررسی انقضا)</label></div>
-      <div class="field full"><div class="help">اگر آدرس شامل پورت نیست، پورت ۴۴۳ استفاده می‌شود. اعتبار گواهی، نام صادرکننده و تاریخ انقضا ذخیره می‌شود.</div></div>`;
+      <div class="field full"><div class="help">اگر آدرس شامل پورت نیست، پورت 443 استفاده می‌شود. اعتبار گواهی، نام صادرکننده و تاریخ انقضا ذخیره می‌شود.</div></div>`;
   }
   if (type === 'proxy') {
     return `<div class="field full"><label>کانفیگ یا لینک ساب‌سکریپشن <span class="req">*</span></label><textarea class="textarea ltr" name="input" rows="5" placeholder="vmess://...&#10;vless://...&#10;https://example.com/subscription&#10;یا متن کامل WireGuard / Clash">${esc(val('input'))}</textarea><div class="help">پشتیبانی از vmess، vless، trojan، shadowsocks، hysteria2/tuic، کانفیگ WireGuard و ساب‌سکریپشن Base64. برای کانفیگ گروهی، تعداد کانفیگ‌های سالم بررسی می‌شود.</div></div>
@@ -2257,6 +2343,16 @@ function monitorTypeFields(type, cfg = {}) {
       <div class="field full"><label>آدرس تست اتصال (HTTP/HTTPS)</label><input class="input ltr" name="test_url" value="${esc(val('test_url'))}" placeholder="https://www.gstatic.com/generate_204"><div class="help">درخواست از داخل تونل به این آدرس زده می‌شود. باید از سمت سرور پروکسی قابل دسترس باشد و کد 2xx/3xx برگرداند.</div></div>
       <div class="field"><label>حداکثر کانفیگ برای تست واقعی</label><input class="input" type="number" min="1" max="30" name="max_real_nodes" value="${Number(val('max_real_nodes', 10)) || 10}"><div class="help">برای سابسکریپشن‌های بزرگ، فقط این تعداد کانفیگ با Xray هندشیک واقعی می‌شوند.</div></div>
       <div class="field full"><div class="service-chips"><span class="chip violet">VMess</span><span class="chip violet">VLESS</span><span class="chip violet">Trojan</span><span class="chip violet">Shadowsocks</span><span class="chip violet">WireGuard</span><span class="chip amber">Hysteria2/TUIC: فقط دسترسی</span></div></div>`;
+  }
+  if (type === 'vps') {
+    return `<div class="field full"><div class="warning-note" style="margin:0">${icon('server')} <div>این مانیتور با API ادمین <b>Virtualizor</b> وضعیت VPS، ترافیک ماهانه و suspend را می‌خواند. API Key و Password را از <b>Admin Panel → API Credentials → List API Pairs</b> بردار.</div></div></div>
+      <div class="field full"><label>آدرس پنل Virtualizor</label><input class="input ltr" name="panel_url" value="${esc(val('panel_url'))}" placeholder="https://panel.example.com:4085" required></div>
+      <div class="field"><label>API Key</label><input class="input ltr" name="api_key" value="${esc(val('api_key'))}" autocomplete="off" required></div>
+      <div class="field"><label>API Password</label><input class="input ltr" type="password" name="api_pass" value="${esc(val('api_pass'))}" autocomplete="off" required></div>
+      <div class="field"><label>VPS ID</label><input class="input" type="number" min="1" name="vps_id" value="${Number(val('vps_id', 0)) || ''}" required></div>
+      <div class="field"><label>هشدار ترافیک (%)</label><input class="input" type="number" min="1" max="99" name="warn_percent" value="${Number(val('warn_percent', 80)) || 80}"></div>
+      <div class="field"><label>بحرانی (%)</label><input class="input" type="number" min="2" max="100" name="critical_percent" value="${Number(val('critical_percent', 95)) || 95}"></div>
+      <div class="field full"><label class="check-row"><input type="checkbox" name="skip_tls_verify" ${checked('skip_tls_verify') ? 'checked' : ''}> نادیده گرفتن گواهی TLS پنل (self-signed)</label></div>`;
   }
   if (type === 'tcp') {
     return `<div class="field full"><div class="warning-note" style="margin:0">${icon('info')} <div>آدرس را به شکل <b class="ltr">host:port</b> وارد کنید. اتصال TCP برقرار می‌شود و تأخیر آن اندازه‌گیری می‌شود.</div></div></div>`;
@@ -2269,8 +2365,9 @@ function targetMeta(type) {
     case 'tcp': return { label: 'آدرس پورت', placeholder: 'example.com:443', hint: 'به شکل host:port' };
     case 'ping': return { label: 'دامنه یا IP', placeholder: '1.1.1.1 یا example.com', hint: 'بدون پورت و پروتکل' };
     case 'dns': return { label: 'دامنه', placeholder: 'example.com', hint: 'نام دامنه برای استعلام DNS' };
-    case 'ssl': return { label: 'دامنه / آدرس', placeholder: 'example.com', hint: 'پورت پیش‌فرض ۴۴۳ است' };
+    case 'ssl': return { label: 'دامنه / آدرس', placeholder: 'example.com', hint: 'پورت پیش‌فرض 443 است' };
     case 'proxy': return { label: 'نام نمایشی کانفیگ', placeholder: 'ساب اصلی — فرانکفورت', hint: 'فقط برای نمایش در داشبورد و اعلان‌ها' };
+    case 'vps': return { label: 'نام نمایشی VPS', placeholder: 'مثلاً VPS آلمان', hint: 'اختیاری — اگر خالی بماند از شناسه VPS استفاده می‌شود.', optional: true };
   }
   return { label: 'هدف', placeholder: '', hint: '' };
 }
@@ -2331,7 +2428,7 @@ function probeAgentHelp(agent, type) {
   const parts = [`تست از سرور «${agent.name}»`];
   if (!online) parts.push('ایجنت آفلاین است؛ تا اتصال مجدد، بررسی از این سرور انجام نمی‌شود');
   else if (agent.can_check === false && agent.transport === 'REST') parts.push('اتصال زندهٔ ایجنت برقرار نیست؛ برای تست از راه دور، gRPC/WebSocket لازم است');
-  else if (agent.can_check === false) parts.push('این ایجنت از تست از راه دور پشتیبانی نمی‌کند؛ نسخهٔ ایجنت را به ۱.۵ به‌روزرسانی کنید');
+  else if (agent.can_check === false) parts.push('این ایجنت از تست از راه دور پشتیبانی نمی‌کند؛ نسخهٔ ایجنت را به 1.5 به‌روزرسانی کنید');
   if (type === 'proxy') {
     if (agent.xray_available) parts.push(`Xray ${agent.xray_version || ''}`.trim());
     else parts.push('Xray روی این ایجنت شناسایی نشده؛ فقط بررسی سریع TCP/TLS انجام می‌شود');
@@ -2374,14 +2471,14 @@ async function openMonitorForm(monitor = null) {
     <div class="form-section" style="border-top:0;margin-top:0;padding-top:0">
       <div class="form-section-title">${icon('layers')} نوع بررسی</div>
       <div class="type-picker">
-        ${Object.entries(TYPES).map(([key, t]) => `<button type="button" class="type-option ${key === type ? 'selected' : ''}" data-action="select-monitor-type" data-type="${key}" aria-pressed="${key === type}">${icon(t.icon)}<b>${t.label}</b><span>${key === 'http' ? 'کد وضعیت، کلیدواژه و SSL' : key === 'tcp' ? 'دسترسی پورت' : key === 'ping' ? 'پاسخ ICMP' : key === 'dns' ? 'مقدار رکورد' : key === 'ssl' ? 'انقضای گواهی' : 'VMess/VLESS/WireGuard'}</span></button>`).join('')}
+        ${Object.entries(TYPES).map(([key, t]) => `<button type="button" class="type-option ${key === type ? 'selected' : ''}" data-action="select-monitor-type" data-type="${key}" aria-pressed="${key === type}">${icon(t.icon)}<b>${t.label}</b><span>${key === 'http' ? 'کد وضعیت، کلیدواژه و SSL' : key === 'tcp' ? 'دسترسی پورت' : key === 'ping' ? 'پاسخ ICMP' : key === 'dns' ? 'مقدار رکورد' : key === 'ssl' ? 'انقضای گواهی' : key === 'vps' ? 'ترافیک، وضعیت و Suspend' : 'VMess/VLESS/WireGuard'}</span></button>`).join('')}
       </div>
       <input type="hidden" name="type" id="m-type" value="${type}">
     </div>
     <div class="form-grid">
       <div class="field"><label>نام مانیتور <span class="req">*</span></label><input class="input" name="name" id="m-name" value="${esc(m?.name || '')}" placeholder="مثلاً سایت اصلی" required></div>
       <div class="field"><label>گروه (اختیاری)</label><input class="input" name="group" id="m-group" value="${esc(m?.group || '')}" placeholder="مثلاً پروژه آلفا"></div>
-      <div class="field full"><label id="m-target-label">${target.label} <span class="req">*</span></label><input class="input ${type === 'proxy' ? '' : 'ltr'}" name="target" id="m-target" value="${esc(m?.target || '')}" placeholder="${esc(target.placeholder)}" required><div class="help" id="m-target-hint">${target.hint}</div></div>
+      <div class="field full"><label id="m-target-label">${target.label}${target.optional ? '' : ' <span class="req">*</span>'}</label><input class="input ${type === 'proxy' || type === 'vps' ? '' : 'ltr'}" name="target" id="m-target" value="${esc(m?.target || '')}" placeholder="${esc(target.placeholder)}" ${target.optional ? '' : 'required'}><div class="help" id="m-target-hint">${target.hint}</div></div>
       <div class="field full">
         <label>اجرای تست از</label>
         <select class="select" name="probe_agent_id" id="m-probe-agent">${probeOptions}</select>
@@ -2493,6 +2590,17 @@ function collectMonitorConfig(form, type) {
     cfg.test_url = formVal(form, 'test_url');
     cfg.max_real_nodes = Number(formVal(form, 'max_real_nodes')) || 10;
     if (!cfg.input) throw new Error('متن کانفیگ یا لینک سابسکریپشن الزامی است');
+  } else if (type === 'vps') {
+    cfg.panel_url = formVal(form, 'panel_url');
+    cfg.api_key = formVal(form, 'api_key');
+    cfg.api_pass = formVal(form, 'api_pass');
+    cfg.vps_id = Number(formVal(form, 'vps_id')) || 0;
+    cfg.warn_percent = Number(formVal(form, 'warn_percent')) || 80;
+    cfg.critical_percent = Number(formVal(form, 'critical_percent')) || 95;
+    cfg.skip_tls_verify = formChecked(form, 'skip_tls_verify');
+    if (!cfg.panel_url || !cfg.api_key || !cfg.api_pass || !cfg.vps_id) {
+      throw new Error('آدرس پنل، API Key، API Password و VPS ID الزامی است');
+    }
   }
   return cfg;
 }
@@ -2507,7 +2615,7 @@ function openRuleForm(rule = null) {
       <div class="field full"><label>نام قانون <span class="req">*</span></label><input class="input" name="name" value="${esc(cleanRuleName(r?.name || ''))}" placeholder="مثلاً هشدار قطعی سایت اصلی" required></div>
       <div class="field"><label>رویداد</label><select class="select" name="trigger" id="rule-trigger">${triggers.map(([k, t]) => `<option value="${k}" ${r?.trigger === k ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>
       <div class="field" id="rule-monitor-field"><label>محدوده</label><select class="select" name="monitor_id"><option value="0">همه مانیتورها</option>${state.monitors.map((m) => `<option value="${m.id}" ${r?.monitor_id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
-      <div class="field" id="rule-threshold-field"><label id="rule-threshold-label">آستانه</label><input class="input" type="number" name="threshold" id="rule-threshold" min="0" value="${r?.threshold || ''}" placeholder="۱۴"><div class="help" id="rule-threshold-help">در صورت رسیدن به این مقدار، قانون اجرا می‌شود.</div></div>
+      <div class="field" id="rule-threshold-field"><label id="rule-threshold-label">آستانه</label><input class="input" type="number" name="threshold" id="rule-threshold" min="0" value="${r?.threshold || ''}" placeholder="14"><div class="help" id="rule-threshold-help">در صورت رسیدن به این مقدار، قانون اجرا می‌شود.</div></div>
       <div class="field"><label>حداقل فاصله بین اعلان‌ها (دقیقه)</label><input class="input" type="number" min="0" max="10080" name="cooldown" value="${r ? Math.round((r.cooldown_sec || 0) / 60) : 15}"><div class="help">برای قطعی/بازیابی، هر تغییر وضعیت ارسال می‌شود؛ این مقدار برای هشدارهای تکرارشونده مثل منابع و انقضاست.</div></div>
       <div class="field full"><label>کانال‌های ارسال</label>
         <div style="display:flex;gap:12px;flex-wrap:wrap;padding:4px 0">
@@ -2537,11 +2645,11 @@ function openRuleForm(rule = null) {
     $('#rule-threshold-field')?.classList.toggle('hidden', !(isResource || isCert));
     if (isResource) {
       $('#rule-threshold-label').textContent = 'آستانه مصرف (درصد)';
-      $('#rule-threshold').placeholder = '۹۰';
+      $('#rule-threshold').placeholder = '90';
       $('#rule-threshold-help').textContent = 'وقتی مصرف از این درصد عبور کند، اعلان ارسال می‌شود.';
     } else if (isCert) {
       $('#rule-threshold-label').textContent = 'چند روز قبل از انقضا';
-      $('#rule-threshold').placeholder = '۱۴';
+      $('#rule-threshold').placeholder = '14';
       $('#rule-threshold-help').textContent = 'وقتی کمتر از این تعداد روز تا انقضای گواهی باقی بماند.';
     }
   };
@@ -2556,9 +2664,9 @@ function openAgentGuide() {
     subtitle: 'پایش منابع سرور در کمتر از دو دقیقه',
     size: 'lg',
     body: `<div class="steps">
-      <div class="step"><span class="step-num">۱</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
-      <div class="step"><span class="step-num">۲</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
-      <div class="step"><span class="step-num">۳</span><p>وضعیت اتصال زنده را با <code>pulse-agent status</code> ببین. آمار هر ۱ ثانیه می‌رسد و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
+      <div class="step"><span class="step-num">1</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
+      <div class="step"><span class="step-num">2</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
+      <div class="step"><span class="step-num">3</span><p>وضعیت اتصال زنده را با <code>pulse-agent status</code> ببین. آمار هر 1 ثانیه می‌رسد و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
     </div>
     <div class="agent-rest-note">${icon('signal')} اتصال gRPC با fallback به WebSocket و REST؛ keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
     <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. توکن را در جای امن نگه دار.</div></div>`,
@@ -2587,7 +2695,7 @@ function openAgentToken(data, title = 'ایجنت آماده نصب است') {
         <div class="install-help">روی VPS مقصد، با کاربر root اجرا کن. اسکریپت باینری را از GitHub Releases دانلود می‌کند، Xray رسمی را برای تست کانفیگ نصب می‌کند و سرویس <code>pulse-agent</code> را با اتصال زنده بالا می‌آورد.</div>
       </div>
       <div class="token-box" style="margin-top:14px"><b>AGENT TOKEN</b><code id="agent-token">${esc(data.token || '')}</code><button class="btn btn-sm btn-ghost" style="margin-top:6px" type="button" data-action="copy" data-copy-target="agent-token">${icon('copy')} کپی توکن</button></div>
-      <div class="agent-rest-note">${icon('signal')} پروتکل ایجنت: gRPC + WebSocket + fallback REST · گزارش زندهٔ ۱ ثانیه‌ای</div>
+      <div class="agent-rest-note">${icon('signal')} پروتکل ایجنت: gRPC + WebSocket + fallback REST · گزارش زندهٔ 1 ثانیه‌ای</div>
       <details class="agent-manual">
         <summary>${icon('sliders')} نصب دستی / عیب‌یابی پیشرفته</summary>
         ${data.download_command ? `<div style="margin-top:10px"><div class="form-section-title">${icon('download')} دریافت باینری</div><div class="code-block" id="agent-download">${esc(data.download_command)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-download">کپی</button></div></div>` : ''}
@@ -2646,7 +2754,7 @@ async function openAgentDetail(id, opts = {}) {
     <div class="mini-stat"><span>تست از این ایجنت</span><b style="font-size:11px" data-agent-detail-xray>${a.can_check ? (a.xray_available ? `Xray ${esc(a.xray_version || '')}` : 'بدون Xray') : online ? 'نیازمند اتصال زنده' : 'آفلاین'}</b></div>
   </div>
   <div class="detail-chart">
-    <div class="detail-chart-head"><b>${icon('chart')} مصرف منابع</b><div class="range-tabs">${[6, 24, 72].map((h) => `<button type="button" data-action="agent-range" data-id="${id}" data-hours="${h}" class="${(opts.hours || 24) == h ? 'active' : ''}">${h === 24 ? '۲۴ ساعت' : h === 6 ? '۶ ساعت' : '۳ روز'}</button>`).join('')}</div></div>
+    <div class="detail-chart-head"><b>${icon('chart')} مصرف منابع</b><div class="range-tabs">${[6, 24, 72].map((h) => `<button type="button" data-action="agent-range" data-id="${id}" data-hours="${h}" class="${(opts.hours || 24) == h ? 'active' : ''}">${h === 24 ? '24 ساعت' : h === 6 ? '6 ساعت' : '3 روز'}</button>`).join('')}</div></div>
     <div style="position:relative"><canvas id="agentChart"></canvas>${metrics.length < 2 ? `<div class="chart-empty">${icon('chart')}<span>داده کافی برای نمودار وجود ندارد</span></div>` : ''}</div>
     <div class="agent-chart-legend"><span class="legend-item"><i class="legend-dot" style="background:#38bdf8"></i> CPU</span><span class="legend-item"><i class="legend-dot" style="background:#8b5cf6"></i> RAM</span><span class="legend-item"><i class="legend-dot" style="background:#f472b6"></i> دیسک</span></div>
   </div>
@@ -2714,7 +2822,7 @@ function openPasswordForm() {
   openModal({
     title: 'تغییر رمز عبور',
     subtitle: 'رمز فعلی و رمز جدید را وارد کنید',
-    body: `<form id="password-form" data-form="password"><div class="form-error"></div><div class="form-grid"><div class="field full"><label>رمز فعلی</label><input class="input ltr" type="password" name="current" autocomplete="current-password" required></div><div class="field full"><label>رمز جدید (حداقل ۸ کاراکتر)</label><input class="input ltr" type="password" name="new" autocomplete="new-password" required></div><div class="field full"><label>تکرار رمز جدید</label><input class="input ltr" type="password" name="confirm" autocomplete="new-password" required></div></div></form>`,
+    body: `<form id="password-form" data-form="password"><div class="form-error"></div><div class="form-grid"><div class="field full"><label>رمز فعلی</label><input class="input ltr" type="password" name="current" autocomplete="current-password" required></div><div class="field full"><label>رمز جدید (حداقل 8 کاراکتر)</label><input class="input ltr" type="password" name="new" autocomplete="new-password" required></div><div class="field full"><label>تکرار رمز جدید</label><input class="input ltr" type="password" name="confirm" autocomplete="new-password" required></div></div></form>`,
     footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">انصراف</button><button class="btn btn-primary btn-sm" type="submit" form="password-form">${icon('key')} تغییر رمز</button>`,
   });
 }
@@ -2833,10 +2941,11 @@ async function onDocumentClick(e) {
         });
         form.querySelector('#type-fields').innerHTML = monitorTypeFields(type, cfg);
         const meta = targetMeta(type);
-        form.querySelector('#m-target-label').innerHTML = `${meta.label} <span class="req">*</span>`;
+        form.querySelector('#m-target-label').innerHTML = `${meta.label}${meta.optional ? '' : ' <span class="req">*</span>'}`;
         const inp = form.querySelector('#m-target');
         inp.placeholder = meta.placeholder;
-        inp.classList.toggle('ltr', type !== 'proxy');
+        inp.required = !meta.optional;
+        inp.classList.toggle('ltr', type !== 'proxy' && type !== 'vps');
         form.querySelector('#m-target-hint').textContent = meta.hint;
         updateProbeAgentHelp(form, type);
         wireLabels(form);
@@ -3063,12 +3172,47 @@ async function onDocumentClick(e) {
         break;
       }
       case 'change-password': closeUserMenu(); openPasswordForm(); break;
+      case 'settings-tab': {
+        const tab = actionEl.dataset.tab || 'general';
+        state.settingsTab = tab;
+        $$('.settings-tab').forEach((el) => {
+          const active = el.dataset.tab === tab;
+          el.classList.toggle('active', active);
+          el.setAttribute('aria-selected', String(active));
+        });
+        $$('[data-settings-pane]').forEach((pane) => pane.classList.toggle('hidden', pane.dataset.settingsPane !== tab));
+        break;
+      }
       case 'download-backup': await downloadBackup(); break;
       case 'install-pwa': {
         if (!state.installPrompt) { toast('نصب خودکار در این مرورگر در دسترس نیست. از منوی مرورگر «Add to Home Screen» را انتخاب کنید.', 'info'); break; }
         state.installPrompt.prompt();
         await state.installPrompt.userChoice;
         state.installPrompt = null;
+        break;
+      }
+      case 'notify-placeholder': {
+        const form = actionEl.closest('form');
+        const area = form?.elements.namedItem('body_template');
+        if (area) {
+          const value = actionEl.dataset.value || '';
+          const start = area.selectionStart ?? area.value.length;
+          const end = area.selectionEnd ?? area.value.length;
+          area.setRangeText(value, start, end, 'end');
+          area.focus();
+          area.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        break;
+      }
+      case 'notify-template-reset': {
+        const form = actionEl.closest('form');
+        if (form) {
+          const title = form.elements.namedItem('title_template');
+          const body = form.elements.namedItem('body_template');
+          if (title) title.value = DEFAULT_NOTIFY_TITLE;
+          if (body) body.value = DEFAULT_NOTIFY_BODY;
+          notifyTemplatePreview(form);
+        }
         break;
       }
       case 'copy': await copyText(textWithoutButtons(document.querySelector(actionEl.dataset.copyTarget))); break;
@@ -3177,9 +3321,10 @@ async function onDocumentSubmit(e) {
     if (mode === 'monitor') {
       const type = formVal(form, 'type');
       const cfg = collectMonitorConfig(form, type);
-      const target = formVal(form, 'target');
+      let target = formVal(form, 'target');
       const name = formVal(form, 'name');
       if (!name) throw new Error('نام مانیتور الزامی است');
+      if (!target && type === 'vps' && cfg.vps_id) target = `VPS ${cfg.vps_id}`;
       if (!target) throw new Error('آدرس/هدف مانیتور الزامی است');
       const cfEnabled = formChecked(form, 'cf_enabled');
       const recordSel = form.querySelector('#m-cf-record');
@@ -3254,7 +3399,7 @@ async function onDocumentSubmit(e) {
     if (mode === 'password') {
       const current = formVal(form, 'current');
       const next = formVal(form, 'new');
-      if (next.length < 8) throw new Error('رمز جدید باید حداقل ۸ کاراکتر باشد');
+      if (next.length < 8) throw new Error('رمز جدید باید حداقل 8 کاراکتر باشد');
       if (next !== formVal(form, 'confirm')) throw new Error('تکرار رمز جدید مطابقت ندارد');
       await api('/api/auth/password', { method: 'POST', body: { current_password: current, new_password: next } });
       closeModal(true);
@@ -3321,6 +3466,18 @@ async function onDocumentSubmit(e) {
       });
       toast('تنظیمات ساعات سکوت ذخیره شد', 'success');
       await refreshNotificationsPreserve('quiet-hours');
+      return;
+    }
+    if (mode === 'notify-template') {
+      await api('/api/settings', {
+        method: 'PUT',
+        body: {
+          notify_title_template: formVal(form, 'title_template'),
+          notify_body_template: formVal(form, 'body_template'),
+        },
+      });
+      toast('قالب اعلان ذخیره شد', 'success');
+      await refreshNotificationsPreserve('notify-template');
       return;
     }
     if (mode === 'settings-general') {

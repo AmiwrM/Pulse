@@ -298,11 +298,11 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Username = strings.TrimSpace(body.Username)
 	if len(body.Username) < 3 || len(body.Username) > 32 {
-		writeErr(w, 400, "نام کاربری باید بین ۳ تا ۳۲ کاراکتر باشد")
+		writeErr(w, 400, "نام کاربری باید بین 3 تا 32 کاراکتر باشد")
 		return
 	}
 	if len(body.Password) < 8 {
-		writeErr(w, 400, "رمز عبور باید حداقل ۸ کاراکتر باشد")
+		writeErr(w, 400, "رمز عبور باید حداقل 8 کاراکتر باشد")
 		return
 	}
 	hash, err := a.auth.hashPassword(body.Password)
@@ -381,7 +381,7 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(body.NewPassword) < 8 {
-		writeErr(w, 400, "رمز عبور جدید باید حداقل ۸ کاراکتر باشد")
+		writeErr(w, 400, "رمز عبور جدید باید حداقل 8 کاراکتر باشد")
 		return
 	}
 	user, err := a.db.GetUser(username)

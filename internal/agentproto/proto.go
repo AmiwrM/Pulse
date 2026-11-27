@@ -50,6 +50,7 @@ type Hello struct {
 	Hostname      string `json:"hostname,omitempty"`
 	OS            string `json:"os,omitempty"`
 	Arch          string `json:"arch,omitempty"`
+	IP            string `json:"ip,omitempty"`
 	CanCheck      bool   `json:"can_check"`
 	XrayAvailable bool   `json:"xray_available"`
 	XrayVersion   string `json:"xray_version,omitempty"`

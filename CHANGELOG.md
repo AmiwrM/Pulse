@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.1
+
+- Removed the remaining Persian digits from UI strings, translation keys,
+  charts and server-side formatted messages; all numbers are Latin now.
+- Split Settings into **General**, **Xray Core** and **System** tabs.
+- Added a notification template editor with `{emoji}`, `{title}`, `{monitor}`,
+  `{reason}`, `{details}`, `{failed_configs}`, `{message}`, `{time}` and more,
+  plus a live preview and HTML support for Telegram.
+- Proxy failures now include the names and errors of failed configs in the
+  incident reason and notification placeholders.
+- Added a **Virtualizor VPS** monitor type using the admin API. It reports
+  running/suspended state, monthly traffic used and remaining, and raises
+  warning/critical incidents at configurable thresholds.
+- The agent now reports its own public IP in Hello and every report, so gRPC
+  links behind Caddy no longer show the proxy's `127.0.0.1` as the server IP.
+- Agent updates can now run from the panel in a transient systemd unit; the
+  server list also exposes restart and update buttons.
+
 ## 1.7.0
 
 - All panel numbers now use Latin digits, including the Persian UI and charts.

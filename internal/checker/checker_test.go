@@ -53,6 +53,9 @@ func TestValidateMonitor(t *testing.T) {
 		{"ssl", "example.com", `{}`, true},
 		{"proxy", "sub", `{"input":"vless://id@example.com:443?security=tls"}`, true},
 		{"proxy", "sub", `{}`, false},
+		{"vps", "VPS 1", `{"panel_url":"https://panel.example.com:4085","api_key":"k","api_pass":"p","vps_id":1}`, true},
+		{"vps", "VPS 1", `{"panel_url":"panel.example.com","api_key":"k","api_pass":"p","vps_id":1}`, false},
+		{"vps", "VPS 1", `{"panel_url":"https://panel.example.com:4085","api_key":"k","api_pass":"p"}`, false},
 	}
 	for _, c := range cases {
 		err := Validate(c.typ, c.target, json.RawMessage(c.cfg))

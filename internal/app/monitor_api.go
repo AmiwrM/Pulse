@@ -34,7 +34,7 @@ type monitorInput struct {
 }
 
 var validMonitorTypes = map[string]bool{
-	"http": true, "tcp": true, "ping": true, "dns": true, "ssl": true, "proxy": true,
+	"http": true, "tcp": true, "ping": true, "dns": true, "ssl": true, "proxy": true, "vps": true,
 }
 
 func (in *monitorInput) normalize() error {

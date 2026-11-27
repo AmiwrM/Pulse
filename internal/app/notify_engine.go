@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -78,6 +79,7 @@ func (a *App) dispatchEvent(ctx context.Context, ev notifyEvent) bool {
 		}
 
 		title, plain, htmlBody, link := a.buildMessage(ev, conf)
+		title, plain, htmlBody = applyNotifyTemplate(conf, ev, title, plain, htmlBody)
 		severity := "warning"
 		switch ev.Trigger {
 		case "down", "agent_offline":
@@ -341,6 +343,96 @@ func (a *App) buildMessage(ev notifyEvent, conf *config.Settings) (title, plain,
 		}
 	}
 	return
+}
+
+func applyNotifyTemplate(conf *config.Settings, ev notifyEvent, title, plain, htmlBody string) (string, string, string) {
+	if conf.NotifyTitleTemplate == "" && conf.NotifyBodyTemplate == "" {
+		return title, plain, htmlBody
+	}
+	loc := loadLocation(conf.Timezone)
+	name, target, hostname := "", "", ""
+	typeLabel, status := "", ""
+	reason, details, failedConfigs := "", "", ""
+	emoji := triggerEmoji(ev.Trigger)
+	if ev.Monitor != nil {
+		m := ev.Monitor
+		name, target = m.Name, m.Target
+		typeLabel = monitorTypeLabel(m.Type)
+		status = statusLabel(m.Status)
+		reason = m.LastError
+		details = m.LastError
+	}
+	if ev.Agent != nil {
+		ag := ev.Agent
+		name, hostname = ag.Name, ag.Hostname
+		status = "آفلاین"
+		reason = "آخرین گزارش: " + util.FormatDateTime(ag.LastSeen, loc)
+		details = reason
+	}
+	if ev.Extra != nil {
+		if v, ok := ev.Extra["warn"].(string); ok && strings.TrimSpace(v) != "" {
+			reason = v
+			details = v
+		}
+		if v, ok := ev.Extra["reason"].(string); ok && strings.TrimSpace(v) != "" {
+			reason = v
+		}
+		if v, ok := ev.Extra["details"].(string); ok && strings.TrimSpace(v) != "" {
+			details = v
+		}
+		if v, ok := ev.Extra["failed_configs"].(string); ok {
+			failedConfigs = v
+			if details == "" {
+				details = v
+			}
+		}
+	}
+	values := map[string]string{
+		"{event}": ev.Trigger, "{title}": title, "{emoji}": emoji,
+		"{monitor}": name, "{agent}": name, "{hostname}": hostname,
+		"{type}": typeLabel, "{target}": target, "{status}": status,
+		"{reason}": reason, "{details}": details, "{failed_configs}": failedConfigs,
+		"{message}": plain,
+		"{value}":   fmt.Sprintf("%.1f", ev.Value), "{time}": util.FormatDateTime(nowUnix(), loc),
+	}
+	pairs := make([]string, 0, len(values)*2)
+	pairsHTML := make([]string, 0, len(values)*2)
+	for k, v := range values {
+		pairs = append(pairs, k, v)
+		pairsHTML = append(pairsHTML, k, html.EscapeString(v))
+	}
+	render := func(tpl string) string { return strings.NewReplacer(pairs...).Replace(tpl) }
+	renderHTML := func(tpl string) string { return strings.NewReplacer(pairsHTML...).Replace(tpl) }
+	if strings.TrimSpace(conf.NotifyTitleTemplate) != "" {
+		title = render(conf.NotifyTitleTemplate)
+	}
+	if strings.TrimSpace(conf.NotifyBodyTemplate) != "" {
+		htmlBody = renderHTML(conf.NotifyBodyTemplate)
+		plain = html.UnescapeString(htmlTagRE.ReplaceAllString(htmlBody, ""))
+	}
+	return title, plain, htmlBody
+}
+
+var htmlTagRE = regexp.MustCompile(`<[^>]*>`)
+
+func triggerEmoji(trigger string) string {
+	switch trigger {
+	case "down":
+		return "🔴"
+	case "up":
+		return "🟢"
+	case "degraded":
+		return "🟡"
+	case "cert_expiring":
+		return "📜"
+	case "agent_offline":
+		return "📡"
+	case "cpu_high", "ram_high", "disk_high":
+		return "⚠️"
+	case "dns_mismatch":
+		return "🌐"
+	}
+	return "🔔"
 }
 
 func (a *App) logNotification(n *model.NotificationLog) {

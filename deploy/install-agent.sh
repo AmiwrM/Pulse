@@ -13,7 +13,7 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.7.0      Release tag (default: latest)
+#   --release v1.7.1      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
@@ -25,7 +25,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.7.0"
+INSTALLER_VERSION="1.7.1"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 

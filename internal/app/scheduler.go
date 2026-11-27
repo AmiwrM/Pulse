@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"pulse/internal/checker"
@@ -166,8 +168,28 @@ func (a *App) checkOne(ctx context.Context, m model.Monitor) {
 
 	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer notifyCancel()
+	notifyExtra := map[string]any{}
+	switch list := meta["failed_configs"].(type) {
+	case []string:
+		if len(list) > 0 {
+			notifyExtra["failed_configs"] = strings.Join(list, "\n")
+		}
+	case []any:
+		failed := make([]string, 0, len(list))
+		for _, item := range list {
+			if s := strings.TrimSpace(fmt.Sprint(item)); s != "" {
+				failed = append(failed, s)
+			}
+		}
+		if len(failed) > 0 {
+			notifyExtra["failed_configs"] = strings.Join(failed, "\n")
+		}
+	}
+	if strings.TrimSpace(res.Warn) != "" {
+		notifyExtra["warn"] = res.Warn
+	}
 	if openIncident {
-		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "down", Monitor: &m, Force: true})
+		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "down", Monitor: &m, Force: true, Extra: notifyExtra})
 		if dnsMismatch(meta) {
 			a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "dns_mismatch", Monitor: &m, Force: true, Extra: meta})
 		}
@@ -176,7 +198,7 @@ func (a *App) checkOne(ctx context.Context, m model.Monitor) {
 		}
 	}
 	if m.Status == "degraded" && before != "degraded" {
-		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "degraded", Monitor: &m, Extra: map[string]any{"warn": res.Warn}})
+		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "degraded", Monitor: &m, Extra: notifyExtra})
 	}
 	if closeIncident {
 		if downSec > 0 {

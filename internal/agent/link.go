@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -42,6 +43,9 @@ type agentRunner struct {
 	probes   *checker.Manager
 	xray     *xray.Engine
 	checkSem chan struct{}
+	ipMu     sync.Mutex
+	ipText   string
+	ipAt     time.Time
 }
 
 type agentLinkConn struct {
@@ -289,6 +293,83 @@ func (r *agentRunner) dialWS(ctx context.Context) (*websocket.Conn, error) {
 	return conn, nil
 }
 
+func (r *agentRunner) cachedIP() string {
+	r.ipMu.Lock()
+	defer r.ipMu.Unlock()
+	return r.ipText
+}
+
+// primePublicIP resolves the agent's public address in the background. The
+// handshake must never wait for an external IP service: behind Caddy the peer
+// address is loopback, but blocking Hello until ipify answers would delay the
+// live link (and the first report) by several seconds.
+func (r *agentRunner) primePublicIP() {
+	if !r.shouldDetectPublicIP() {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+		defer cancel()
+		r.publicIP(ctx)
+	}()
+}
+
+func (r *agentRunner) shouldDetectPublicIP() bool {
+	u, err := url.Parse(strings.TrimSpace(r.server))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
+func (r *agentRunner) publicIP(ctx context.Context) string {
+	r.ipMu.Lock()
+	if r.ipText != "" || (!r.ipAt.IsZero() && time.Since(r.ipAt) < 5*time.Minute) {
+		value := r.ipText
+		r.ipMu.Unlock()
+		return value
+	}
+	r.ipAt = time.Now()
+	r.ipMu.Unlock()
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	for _, endpoint := range []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+		"https://icanhazip.com",
+	} {
+		reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			cancel()
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			cancel()
+			continue
+		}
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 128))
+		resp.Body.Close()
+		cancel()
+		value := strings.TrimSpace(string(data))
+		if ip := net.ParseIP(value); ip != nil {
+			r.ipMu.Lock()
+			r.ipText = ip.String()
+			r.ipMu.Unlock()
+			return ip.String()
+		}
+	}
+	return ""
+}
+
 func (r *agentRunner) serveLink(parent context.Context, link agentLinkConn, transport string) error {
 	ctx, cancel := context.WithCancelCause(parent)
 	defer cancel(nil)
@@ -308,11 +389,12 @@ func (r *agentRunner) serveLink(parent context.Context, link agentLinkConn, tran
 		return nil
 	}
 
+	r.primePublicIP()
 	snap, firstReport := r.coll.snapshot()
 	status := r.xray.Status()
 	hello := &agentproto.Hello{
 		Version: r.opts.Version, Hostname: snap.Hostname, OS: snap.OS, Arch: snap.Arch,
-		CanCheck: true, XrayAvailable: status.Available, XrayVersion: status.Version,
+		IP: r.cachedIP(), CanCheck: true, XrayAvailable: status.Available, XrayVersion: status.Version,
 		IntervalSec: int(liveInterval / time.Second),
 	}
 	if err := send(&agentproto.AgentEvent{Type: agentproto.EventHello, Hello: hello}); err != nil {
@@ -335,6 +417,7 @@ func (r *agentRunner) serveLink(parent context.Context, link agentLinkConn, tran
 	// Use the same snapshot for hello and the first report: a second immediate
 	// snapshot would calculate network rates over a near-zero interval.
 	firstReport.Version = r.opts.Version
+	firstReport.IP = r.cachedIP()
 	if err := send(&agentproto.AgentEvent{Type: agentproto.EventReport, Report: &firstReport}); err != nil {
 		return err
 	}
@@ -361,6 +444,7 @@ func (r *agentRunner) serveLink(parent context.Context, link agentLinkConn, tran
 func (r *agentRunner) sendReport(send func(*agentproto.AgentEvent) error) error {
 	_, report := r.coll.snapshot()
 	report.Version = r.opts.Version
+	report.IP = r.cachedIP()
 	if err := send(&agentproto.AgentEvent{Type: agentproto.EventReport, Report: &report, SentAt: time.Now().Unix()}); err != nil {
 		return err
 	}
@@ -479,12 +563,14 @@ func (r *agentRunner) runRESTWindow(ctx context.Context, window time.Duration) e
 		r.logger.Debug("agent REST handshake failed", "error", err)
 	}
 	deadline := time.Now().Add(window)
+	r.primePublicIP()
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 		_, report := r.coll.snapshot()
 		report.Version = r.opts.Version
+		report.IP = r.cachedIP()
 		if err := client.report(ctx, report); err != nil {
 			return err
 		}

@@ -28,6 +28,9 @@ type Settings struct {
 	TelegramToken   string `json:"-"`
 	TelegramChatID  string `json:"telegram_chat_id"`
 
+	NotifyTitleTemplate string `json:"notify_title_template"`
+	NotifyBodyTemplate  string `json:"notify_body_template"`
+
 	WebPushEnabled bool `json:"webpush_enabled"`
 
 	WebhookURL    string `json:"webhook_url"`
@@ -45,6 +48,13 @@ type Settings struct {
 	VAPIDPrivate  string `json:"-"`
 	SessionSecret string `json:"-"`
 }
+
+const defaultNotifyBodyTemplate = `{emoji} <b>{title}</b>
+
+🖥 <b>{monitor}</b>
+🧠 دلیل: {reason}
+📋 جزئیات: {details}
+🕒 {time}`
 
 type reader interface {
 	AllSettings() (map[string]string, error)
@@ -74,6 +84,8 @@ func Load(st reader, wr writer) (*Settings, error) {
 		AgentDownloadURL:     defaultAgentDownloadURL(),
 		XrayBinary:           "xray",
 		XrayTestURL:          "https://www.gstatic.com/generate_204",
+		NotifyTitleTemplate:  "{emoji} {title}",
+		NotifyBodyTemplate:   defaultNotifyBodyTemplate,
 	}
 	s.Timezone = val(m, "timezone", s.Timezone)
 	s.PublicBaseURL = val(m, "public_base_url", "")
@@ -90,6 +102,14 @@ func Load(st reader, wr writer) (*Settings, error) {
 	s.TelegramEnabled = valBool(m, "telegram_enabled", false)
 	s.TelegramToken = m["telegram_token"]
 	s.TelegramChatID = m["telegram_chat_id"]
+	s.NotifyTitleTemplate = m["notify_title_template"]
+	s.NotifyBodyTemplate = m["notify_body_template"]
+	if s.NotifyTitleTemplate == "" {
+		s.NotifyTitleTemplate = "{emoji} {title}"
+	}
+	if s.NotifyBodyTemplate == "" {
+		s.NotifyBodyTemplate = defaultNotifyBodyTemplate
+	}
 	s.WebPushEnabled = valBool(m, "webpush_enabled", true)
 	s.WebhookURL = m["webhook_url"]
 	s.WebhookSecret = m["webhook_secret"]
@@ -148,6 +168,8 @@ func (s *Settings) Persist(wr writer) error {
 		"telegram_enabled":        boolStr(s.TelegramEnabled),
 		"telegram_token":          s.TelegramToken,
 		"telegram_chat_id":        s.TelegramChatID,
+		"notify_title_template":   s.NotifyTitleTemplate,
+		"notify_body_template":    s.NotifyBodyTemplate,
 		"webpush_enabled":         boolStr(s.WebPushEnabled),
 		"webhook_url":             s.WebhookURL,
 		"webhook_secret":          s.WebhookSecret,

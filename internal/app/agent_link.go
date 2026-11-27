@@ -223,6 +223,9 @@ func (s *agentSession) handleEvent(ev *agentproto.AgentEvent) {
 		s.helloMu.Lock()
 		s.hello = *ev.Hello
 		s.helloMu.Unlock()
+		if strings.TrimSpace(ev.Hello.IP) != "" {
+			s.ip = strings.TrimSpace(ev.Hello.IP)
+		}
 		_ = s.app.db.TouchAgent(s.agentID, nowUnix())
 		s.app.broadcastAgentLink(s, true)
 	case agentproto.EventReport:
@@ -230,7 +233,9 @@ func (s *agentSession) handleEvent(ev *agentproto.AgentEvent) {
 			return
 		}
 		report := *ev.Report
-		if strings.TrimSpace(report.IP) == "" {
+		if ip := strings.TrimSpace(report.IP); ip != "" {
+			s.ip = ip
+		} else {
 			report.IP = s.ip
 		}
 		if err := s.app.applyAgentReport(s.agentID, report, s.transport); err != nil {
