@@ -8,7 +8,7 @@ import (
 )
 
 var validTriggers = map[string]bool{
-	"down": true, "up": true, "cert_expiring": true,
+	"down": true, "up": true, "degraded": true, "cert_expiring": true,
 	"cpu_high": true, "ram_high": true, "disk_high": true,
 	"agent_offline": true, "dns_mismatch": true,
 }

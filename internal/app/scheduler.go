@@ -175,6 +175,9 @@ func (a *App) checkOne(ctx context.Context, m model.Monitor) {
 			go a.applyCFFailover(m, "failover")
 		}
 	}
+	if m.Status == "degraded" && before != "degraded" {
+		a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "degraded", Monitor: &m, Extra: map[string]any{"warn": res.Warn}})
+	}
 	if closeIncident {
 		if downSec > 0 {
 			a.dispatchEvent(notifyCtx, notifyEvent{Trigger: "up", Monitor: &m, Force: true, Extra: map[string]any{"down_sec": downSec}})

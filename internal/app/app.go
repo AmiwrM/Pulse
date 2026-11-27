@@ -209,6 +209,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agents", a.requireAuth(a.handleCreateAgent))
 	mux.HandleFunc("GET /api/agents/{id}/metrics", a.requireAuth(a.handleAgentMetrics))
 	mux.HandleFunc("POST /api/agents/{id}/rotate", a.requireAuth(a.handleRotateAgent))
+	mux.HandleFunc("POST /api/agents/{id}/command", a.requireAuth(a.handleAgentCommand))
+	mux.HandleFunc("GET /api/geo", a.requireAuth(a.handleGeoLookup))
 	mux.HandleFunc("PUT /api/agents/{id}", a.requireAuth(a.handleUpdateAgent))
 	mux.HandleFunc("DELETE /api/agents/{id}", a.requireAuth(a.handleDeleteAgent))
 

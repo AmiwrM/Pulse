@@ -10,7 +10,18 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.6.4
+### خلاصهٔ نسخهٔ 1.7.0
+
+- اعداد در کل پنل لاتین شدند، حتی وقتی رابط فارسی و فونت ایران‌سنس فعال است.
+- صفحهٔ لاگ کاملاً انگلیسی شد و یک سوییچ **Auto refresh** دارد که انتخابش در مرورگر ذخیره می‌شود.
+- مودال‌ها بازطراحی شدند: کلیک بیرون پنجره دیگر آن‌ها را نمی‌بندد، تغییرات ذخیره‌نشده قبل از بستن تأیید می‌خواهند و شیت موبایل با دستگیره و safe-area بهتر شده است.
+- حاشیهٔ اضافی iPhone در حالت موبایل برطرف شد و عنوان/محتوا از safe-area استفاده می‌کنند.
+- در پنجرهٔ سرور، کشور، ISP و ASN آدرس IP نمایش داده می‌شود.
+- ری‌استارت و آپدیت ایجنت از داخل پنل ممکن شد (آپدیت در یک واحد موقت systemd اجرا می‌شود).
+- قانون جدید **هشدار/degraded** اضافه شد و دلیل هشدار در اعلان تلگرام/Web Push/وب‌هوک ارسال می‌شود.
+- favicon گوشه‌گرد شد.
+
+**تغییرات 1.6.4:**
 
 - پشتیبانی از **VLESS Encryption** جدید (`encryption=mlkem768x25519plus...`) در تست واقعی Xray؛ قبلاً همیشه `encryption: none` فرستاده می‌شد و این کانفیگ‌ها هندشیک نمی‌گرفتند.
 - جستجوی کلیدواژهٔ HTTP در **هدرهای پاسخ** هم اضافه شد: گزینه‌های «بدنه پاسخ»، «هدرهای پاسخ» و «بدنه + هدرها». برای ساب‌سکریپشن‌هایی که عنوان/نام را در هدر برمی‌گردانند مناسب است.
@@ -159,8 +170,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.6.4
-git push origin v1.6.4
+git tag v1.7.0
+git push origin v1.7.0
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -173,7 +184,7 @@ git push origin v1.6.4
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.6.4 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.7.0 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -203,7 +214,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 # پنل
 pulse start | stop | restart | status
 pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
-pulse update [--release v1.6.4] [--no-restart]
+pulse update [--release v1.7.0] [--no-restart]
 pulse port                       # نمایش پورت فعلی
 pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
 pulse uninstall [--purge] [--yes]
@@ -224,8 +235,8 @@ pulse-agent version
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.6.4
-pulse-agent update --release v1.6.4
+pulse update --release v1.7.0
+pulse-agent update --release v1.7.0
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -817,7 +828,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.6.4` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.7.0` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -856,8 +867,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.6.4
-git push origin v1.6.4
+git tag v1.7.0
+git push origin v1.7.0
 ```
 
 ---

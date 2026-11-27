@@ -263,6 +263,22 @@ func (a *App) buildMessage(ev notifyEvent, conf *config.Settings) (title, plain,
 			htmlBody = fmt.Sprintf("🟢 <b>بازیابی سرویس</b>\n\n<b>%s</b>\n🌐 هدف: <code>%s</code>%s\n🕒 %s",
 				name, target, strings.ReplaceAll(dur, "\n", "<br>"), util.FaDigits(stamp))
 			link = "/#/monitors"
+		case "degraded":
+			warn := ""
+			if ev.Extra != nil {
+				if v, ok := ev.Extra["warn"].(string); ok {
+					warn = v
+				}
+			}
+			if warn == "" {
+				warn = m.LastError
+			}
+			title = "🟡 هشدار سرویس: " + m.Name
+			plain = fmt.Sprintf("%s در وضعیت هشدار است.\nهدف: %s\nدلیل: %s\nزمان: %s",
+				m.Name, m.Target, fallback(warn, "بدون جزئیات"), stamp)
+			htmlBody = fmt.Sprintf("🟡 <b>هشدار سرویس</b>\n\n<b>%s</b>\n🌐 هدف: <code>%s</code>\n📄 دلیل: %s\n🕒 %s",
+				name, target, html.EscapeString(truncateRunes(warn, 500)), util.FaDigits(stamp))
+			link = "/#/monitors"
 		case "cert_expiring":
 			days := int(ev.Value)
 			title = fmt.Sprintf("📜 گواهی SSL %s رو به انقضاست", m.Name)

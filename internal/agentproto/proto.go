@@ -37,9 +37,11 @@ const (
 
 // Panel commands.
 const (
-	CommandHello = "hello_ack"
-	CommandCheck = "run_check"
-	CommandError = "error"
+	CommandHello   = "hello_ack"
+	CommandCheck   = "run_check"
+	CommandRestart = "restart"
+	CommandUpdate  = "update"
+	CommandError   = "error"
 )
 
 // Hello is sent once when an agent opens a live link.

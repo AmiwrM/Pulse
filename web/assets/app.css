@@ -447,6 +447,7 @@ img, svg, canvas { display: block; }
 .agent-title { min-width: 0; flex: 1; }
 .agent-name { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-host { font-size: 10px; color: var(--faint); direction: ltr; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.agent-geo { font-size: 9.5px; color: var(--faint); direction: ltr; text-align: right; margin-top: 3px; }
 .agent-online { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 7px; font-size: 9px; background: rgba(52, 211, 153, .08); color: #6ee7b7; border: 1px solid rgba(52, 211, 153, .14); }
 .agent-online.off { background: rgba(251, 113, 133, .07); color: #fda4af; border-color: rgba(251, 113, 133, .15); }
 .agent-online .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
@@ -474,6 +475,9 @@ img, svg, canvas { display: block; }
 
 /* ------------------------------------------------------------------ logs page */
 .log-toolbar { margin-bottom: 14px; }
+.log-auto-refresh { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.log-auto-refresh .switch { width: 34px; height: 19px; }
+.log-auto-refresh .switch span::before { width: 13px; height: 13px; }
 .log-toolbar .select { width: auto; min-width: 128px; flex: 0 0 auto; }
 .log-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .log-row { padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(130, 160, 220, .025); }
@@ -654,6 +658,7 @@ input[type="range"] { accent-color: #0ea5e9; height: 4px; width: 100%; }
    create a composited backdrop root that paints the backdrop (and the page)
    over the dialog surface, making modals look transparent. */
 @keyframes fadeIn { from { opacity: 0; } }
+.sheet-handle { display: none; }
 .modal { position: relative; width: min(620px, 100%); max-height: min(88vh, 900px); display: flex; flex-direction: column; background: linear-gradient(160deg, #0f192d, #080d19 70%); border: 1px solid var(--line-strong); border-radius: 22px; box-shadow: 0 40px 120px -30px rgba(0, 0, 0, .95); animation: modalPop .26s cubic-bezier(.22, .8, .25, 1); overflow: hidden; }
 .modal.lg { width: min(920px, 100%); }
 .modal.sm { width: min(420px, 100%); }
@@ -900,8 +905,14 @@ button.is-busy { cursor: progress; opacity: .8; }
   .cf-status { width: 100%; justify-content: flex-start; }
 }
 @media (max-width: 700px) {
-  body { font-size: 13px; }
-  .topbar, .view, .footer { padding-inline: 14px; }
+  html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+  body { font-size: 13px; overscroll-behavior-x: none; }
+  .app, .main { width: 100%; max-width: 100%; margin-inline: 0; min-width: 0; }
+  .sidebar { width: min(var(--sidebar-w), 88vw); }
+  .topbar, .view, .footer {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
   .topbar { padding-top: 14px; gap: 8px; }
   .page-heading h1 { font-size: 19px; }
   .crumb { font-size: 9.5px; }
@@ -937,10 +948,11 @@ button.is-busy { cursor: progress; opacity: .8; }
   .type-picker { grid-template-columns: 1fr 1fr; }
   .modal-backdrop { padding: 0; align-items: flex-end; background: rgba(3, 6, 13, .7); }
   .modal {
-    width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; border-bottom: 0;
+    width: 100%; max-height: 92vh; max-height: 92dvh; border-radius: 20px 20px 0 0; border-bottom: 0;
     box-shadow: 0 -12px 44px -28px rgba(0, 0, 0, .9);
-    animation: sheetIn .16s cubic-bezier(.2, .8, .2, 1); will-change: transform;
+    animation: sheetIn .18s cubic-bezier(.2, .8, .2, 1); will-change: transform;
   }
+  .sheet-handle { display: block; width: 42px; height: 4px; border-radius: 99px; background: rgba(148, 163, 184, .32); margin: 7px auto 0; flex: 0 0 auto; }
   .modal.lg, .modal.sm { width: 100%; }
   .modal-body { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .modal-head, .modal-body, .modal-foot { padding-inline: 16px; }

@@ -1,8 +1,8 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=18';
-import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=18';
+import { lineChart, sparkline } from './charts.js?v=20';
+import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=20';
 
 initI18n();
 
@@ -19,6 +19,7 @@ const state = {
   rules: [],
   agents: [],
   agentsOfflineAfter: 120,
+  geoCache: {},
   settingsData: null,
   cfStatus: null,
   cfZones: [],
@@ -33,6 +34,9 @@ const state = {
   notifications: [],
   audit: [],
   logs: [],
+  logAutoRefresh: (() => {
+    try { return localStorage.getItem('pulse-logs-auto') === '1'; } catch { return false; }
+  })(),
   logCategory: 'all',
   logLevel: 'all',
   logQuery: '',
@@ -60,21 +64,24 @@ const state = {
 /* ------------------------------------------------------------------ format */
 const EN = getLang() === 'en';
 const LOCALE = EN ? 'en-US' : 'fa-IR';
-const nf0 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
-const nf1 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 });
-const dtShort = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'short' });
-const dtFull = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
-const clockFmt = new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false });
-const clockDate = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
+// Numbers are always Latin, even with the Persian font. Dates stay Jalali in
+// Persian, but use Latin digits too (fa-IR-u-nu-latn).
+const NUM_LOCALE = 'en-US';
+const DATE_LOCALE = EN ? 'en-US' : 'fa-IR-u-nu-latn';
+const nf0 = new Intl.NumberFormat(NUM_LOCALE, { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat(NUM_LOCALE, { maximumFractionDigits: 1 });
+const dtShort = new Intl.DateTimeFormat(DATE_LOCALE, { dateStyle: 'short' });
+const dtFull = new Intl.DateTimeFormat(DATE_LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
+const clockFmt = new Intl.DateTimeFormat(DATE_LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false });
+const clockDate = new Intl.DateTimeFormat(DATE_LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
 
 function num(v, digits = 0) {
   const n = Number(v);
-  if (!Number.isFinite(n)) return EN ? '0' : '۰';
+  if (!Number.isFinite(n)) return '0';
   return digits === 1 ? nf1.format(n) : nf0.format(n);
 }
 function fa(value) {
-  const text = String(value);
-  return EN ? text : text.replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+  return String(value);
 }
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -265,6 +272,7 @@ function cleanRuleName(name) {
 const TRIGGERS = {
   down: { label: 'قطع سرویس', icon: 'alert', tone: 'down', desc: 'وقتی یک مانیتور پس از رسیدن به آستانهٔ خطا قطع می‌شود.' },
   up: { label: 'بازیابی سرویس', icon: 'check', tone: 'up', desc: 'وقتی سرویس قطع‌شده دوباره سالم می‌شود.' },
+  degraded: { label: 'هشدار سرویس', icon: 'alert', tone: 'warn', desc: 'وقتی سرویس سالم است اما بررسی با هشدار یا وضعیت degraded برمی‌گردد.' },
   cert_expiring: { label: 'انقضای گواهی SSL', icon: 'shield', tone: 'cert', desc: 'وقتی عمر گواهی از آستانهٔ تعیین‌شده کمتر شود.' },
   cpu_high: { label: 'مصرف بالای CPU', icon: 'cpu', tone: 'resource', desc: 'وقتی مصرف پردازندهٔ سرور از آستانه عبور کند.' },
   ram_high: { label: 'مصرف بالای RAM', icon: 'ram', tone: 'resource', desc: 'وقتی مصرف حافظهٔ سرور از آستانه عبور کند.' },
@@ -336,31 +344,54 @@ function openModal({ title, subtitle = '', body = '', footer = '', size = '', on
   state.modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const root = $('#modal-root');
   root.innerHTML = `<div class="modal-backdrop"><div class="modal ${size}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <div class="sheet-handle" aria-hidden="true"></div>
     <div class="modal-head">
       <div class="modal-head-copy"><h3>${esc(title)}</h3>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>
-      <button class="modal-close" type="button" data-action="close-modal" aria-label="بستن">${icon('close')}</button>
+      <button class="modal-close" type="button" data-action="close-modal" aria-label="Close">${icon('close')}</button>
     </div>
     <div class="modal-body">${body}</div>
     ${footer ? `<div class="modal-foot">${footer}</div>` : ''}
   </div></div>`;
   if (EN) translateDOM(root);
+  state.modal = { onClose, dirty: false, confirming: false };
   const backdrop = $('.modal-backdrop', root);
+  // Never close from a backdrop click. A small mouse movement outside a dialog
+  // (or a touch that ends on the backdrop) used to discard half-filled forms.
   backdrop.addEventListener('click', (e) => {
-    if (e.target !== backdrop) return;
-    // On phones the sheet is full width and a stray outside tap (or a scroll
-    // gesture that ends on the backdrop) must not discard a half-filled form.
-    if (window.matchMedia('(max-width: 700px)').matches) return;
-    closeModal();
+    if (e.target === backdrop) e.stopPropagation();
   });
-  state.modal = { onClose };
+  const markDirty = () => { if (state.modal) state.modal.dirty = true; };
+  root.addEventListener('input', markDirty);
+  root.addEventListener('change', markDirty);
   document.body.classList.add('modal-open');
   wireLabels(root);
-  const first = root.querySelector('.modal-body input:not([type=hidden]), .modal-body select, .modal-body textarea, .modal-body button') || root.querySelector('.modal-close');
-  setTimeout(() => { if (first?.isConnected) first.focus({ preventScroll: true }); }, 80);
+  const mobile = window.matchMedia('(max-width: 700px)').matches;
+  const target = mobile
+    ? root.querySelector('.modal-close')
+    : (root.querySelector('.modal-body input:not([type=hidden]), .modal-body select, .modal-body textarea, .modal-body button') || root.querySelector('.modal-close'));
+  requestAnimationFrame(() => { if (target?.isConnected) target.focus({ preventScroll: true }); });
 }
 function closeModal(silent = false) {
   const root = $('#modal-root');
   if (!root) return;
+  const current = state.modal;
+  if (!silent && current?.dirty) {
+    if (current.confirming) return;
+    current.confirming = true;
+    confirmAction({
+      title: 'Discard changes?',
+      message: 'You have unsaved changes in this dialog. Closing it will discard them.',
+      confirmText: 'Discard',
+      danger: true,
+    }).then((ok) => {
+      if (state.modal) state.modal.confirming = false;
+      if (ok && state.modal) {
+        state.modal.dirty = false;
+        closeModal();
+      }
+    });
+    return;
+  }
   const returnFocus = state.modalReturnFocus;
   root.innerHTML = '';
   document.body.classList.remove('modal-open');
@@ -974,6 +1005,19 @@ function statusFromAgent(a) {
   if (!a.last_seen) return false;
   return Date.now() / 1000 - a.last_seen <= (state.agentsOfflineAfter || 120);
 }
+async function geoLookup(ip) {
+  const key = String(ip || '').trim();
+  if (!key) return null;
+  if (state.geoCache[key]) return state.geoCache[key];
+  try {
+    const info = await api(`/api/geo?ip=${encodeURIComponent(key)}`, { timeout: 12000 });
+    if (info) state.geoCache[key] = info;
+    return info;
+  } catch {
+    state.geoCache[key] = { error: true };
+    return null;
+  }
+}
 function agentQuality(a) {
   const online = statusFromAgent(a);
   const age = a.last_seen ? Math.max(0, Date.now() / 1000 - Number(a.last_seen)) : null;
@@ -1485,11 +1529,11 @@ function renderIncidents() {
 
 /* ------------------------------------------------------------------ logs */
 const LOG_CATEGORY_LABELS = {
-  all: 'همه', panel: 'پنل', scheduler: 'زمان‌بند', monitor: 'مانیتور',
-  xray: 'Xray', cloudflare: 'کلادفلر', notify: 'اعلان‌ها', agent: 'ایجنت',
-  security: 'امنیت', api: 'API',
+  all: 'All', panel: 'Panel', scheduler: 'Scheduler', monitor: 'Monitor',
+  xray: 'Xray', cloudflare: 'Cloudflare', notify: 'Notifications', agent: 'Agent',
+  security: 'Security', api: 'API',
 };
-const LOG_LEVEL_LABELS = { all: 'همه', debug: 'دیباگ', info: 'اطلاع', warn: 'هشدار', error: 'خطا' };
+const LOG_LEVEL_LABELS = { all: 'All', debug: 'Debug', info: 'Info', warn: 'Warning', error: 'Error' };
 
 function logCategoryLabel(category) { return LOG_CATEGORY_LABELS[category] || category || '—'; }
 function logLevelLabel(level) { return LOG_LEVEL_LABELS[level] || level || '—'; }
@@ -1498,6 +1542,7 @@ function stopLogsPoll() {
 }
 function startLogsPoll() {
   stopLogsPoll();
+  if (!state.logAutoRefresh) return;
   state.logTimer = setInterval(() => {
     if (state.view === 'logs' && !state.modal) refreshLogsList().catch(() => {});
   }, 4000);
@@ -1532,11 +1577,11 @@ async function refreshLogsList() {
     }
   }
   const count = $('[data-log-count]');
-  if (count) count.textContent = `${num(state.logs.length)} رویداد`;
+  if (count) count.textContent = `${num(state.logs.length)} events`;
 }
 function logsListHTML() {
   if (!state.logs.length) {
-    return `<div class="empty" style="padding:36px 16px"><div class="empty-ico" style="width:46px;height:46px">${icon('terminal')}</div><h3 style="font-size:12px">در این دسته لاگی نیست</h3><p style="font-size:10px">با تغییر فیلتر یا منتظر ماندن، رویدادهای جدید اینجا نمایش داده می‌شوند.</p></div>`;
+    return `<div class="empty" style="padding:36px 16px"><div class="empty-ico" style="width:46px;height:46px">${icon('terminal')}</div><h3 style="font-size:12px">No logs in this category</h3><p style="font-size:10px">Change the filters or wait for new events to appear here.</p></div>`;
   }
   return state.logs.map((entry) => {
     let detail = entry.detail || '';
@@ -1550,7 +1595,7 @@ function logsListHTML() {
         <span class="log-time">${dateTime(entry.at)}</span>
       </div>
       <div class="log-message">${esc(entry.message)}</div>
-      ${detail ? `<details class="log-detail"><summary>جزئیات فنی</summary><pre>${esc(detail)}</pre></details>` : ''}
+      ${detail ? `<details class="log-detail"><summary>Technical details</summary><pre>${esc(detail)}</pre></details>` : ''}
     </article>`;
   }).join('');
 }
@@ -1559,16 +1604,17 @@ function renderLogs() {
   const levels = Object.keys(LOG_LEVEL_LABELS).map((key) => `<option value="${key}" ${state.logLevel === key ? 'selected' : ''}>${LOG_LEVEL_LABELS[key]}</option>`).join('');
   $('#view').innerHTML = `
     <div class="page-toolbar log-toolbar">
-      <div class="search-box">${icon('search')}<input id="log-search" placeholder="جستجو در پیام یا جزئیات…" value="${esc(state.logQuery)}" autocomplete="off"></div>
-      <select class="select" id="log-category" aria-label="دستهٔ لاگ">${categories}</select>
-      <select class="select" id="log-level" aria-label="سطح لاگ">${levels}</select>
+      <div class="search-box">${icon('search')}<input id="log-search" placeholder="Search messages or details…" value="${esc(state.logQuery)}" autocomplete="off"></div>
+      <select class="select" id="log-category" aria-label="Log category">${categories}</select>
+      <select class="select" id="log-level" aria-label="Log level">${levels}</select>
       <div class="toolbar-spacer"></div>
-      <div class="page-summary"><span class="badge-dot"><span class="dot"></span><span data-log-count>${num(state.logs.length)} رویداد</span></span></div>
-      <button class="btn btn-sm btn-soft" type="button" data-action="refresh-logs">${icon('refresh')} به‌روزرسانی</button>
+      <div class="page-summary"><span class="badge-dot"><span class="dot"></span><span data-log-count>${num(state.logs.length)} events</span></span></div>
+      <label class="log-auto-refresh"><span>Auto refresh</span><span class="switch"><input id="log-auto-refresh" type="checkbox" ${state.logAutoRefresh ? 'checked' : ''}><span></span></span></label>
+      <button class="btn btn-sm btn-soft" type="button" data-action="refresh-logs">${icon('refresh')} Refresh</button>
     </div>
     <div class="banner">
       <div class="banner-ico">${icon('terminal')}</div>
-      <div class="banner-body"><b>لاگ‌های تفکیک‌شدهٔ پالس</b><p>هر بخش لاگ خودش را دارد: پنل، زمان‌بند، مانیتور، Xray، کلادفلر، اعلان‌ها، ایجنت، امنیت و API. صفحه هر ۴ ثانیه به‌روزرسانی می‌شود.</p></div>
+      <div class="banner-body"><b>Pulse structured logs</b><p>Panel, scheduler, monitor, Xray, Cloudflare, notifications, agent, security and API events are kept in separate categories. Logs can be refreshed manually or automatically every 4 seconds.</p></div>
     </div>
     <div class="log-list" id="log-list">${logsListHTML()}</div>`;
 }
@@ -1590,6 +1636,12 @@ function bindLogFilters() {
   $('#log-level')?.addEventListener('change', (e) => {
     state.logLevel = e.target.value;
     refreshLogsList().catch(() => {});
+  });
+  $('#log-auto-refresh')?.addEventListener('change', (e) => {
+    state.logAutoRefresh = e.target.checked;
+    try { localStorage.setItem('pulse-logs-auto', state.logAutoRefresh ? '1' : '0'); } catch { /* private mode */ }
+    startLogsPoll();
+    if (state.logAutoRefresh) refreshLogsList().catch(() => {});
   });
 }
 
@@ -2480,7 +2532,7 @@ function openRuleForm(rule = null) {
     const trigger = formVal(form, 'trigger');
     const isResource = ['cpu_high', 'ram_high', 'disk_high'].includes(trigger);
     const isCert = trigger === 'cert_expiring';
-    const scopeable = ['down', 'up', 'cert_expiring', 'dns_mismatch'].includes(trigger);
+    const scopeable = ['down', 'up', 'degraded', 'cert_expiring', 'dns_mismatch'].includes(trigger);
     $('#rule-monitor-field')?.classList.toggle('hidden', !scopeable);
     $('#rule-threshold-field')?.classList.toggle('hidden', !(isResource || isCert));
     if (isResource) {
@@ -2566,8 +2618,8 @@ async function openAgentDetail(id, opts = {}) {
   const peers = wg.reduce((s, w) => s + (w.peers?.length || 0), 0);
   const body = `<div class="detail-hero">
     <div class="agent-ico agent-ico-pulse" style="width:46px;height:46px">${icon('agent')}</div>
-    <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}" data-agent-detail-online><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}${a.ip ? ' · ' + esc(a.ip) : ''}</div></div>
-    <div class="detail-actions"><button class="btn btn-sm" type="button" data-action="edit-agent" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-soft" type="button" data-action="rotate-agent" data-id="${a.id}">${icon('key')} توکن جدید</button></div>
+    <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}" data-agent-detail-online><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}${a.ip ? ' · ' + esc(a.ip) : ''}</div>${a.ip ? `<div class="agent-geo" data-agent-geo>Looking up IP owner…</div>` : ''}</div>
+    <div class="detail-actions"><button class="btn btn-sm" type="button" data-action="restart-agent" data-id="${a.id}">${icon('refresh')} ری‌استارت</button><button class="btn btn-sm" type="button" data-action="update-agent" data-id="${a.id}">${icon('download')} آپدیت ایجنت</button><button class="btn btn-sm" type="button" data-action="edit-agent" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-soft" type="button" data-action="rotate-agent" data-id="${a.id}">${icon('key')} توکن جدید</button></div>
   </div>
   <div class="agent-connection detail-connection">
     <span class="agent-quality ${online ? 'great' : 'off'}" data-agent-detail-quality>${icon('signal')} ${online ? `${agentTransport(a) || 'زنده'} متصل` : 'قطع ارتباط'}</span>
@@ -2615,6 +2667,19 @@ async function openAgentDetail(id, opts = {}) {
     onClose: () => { if (location.hash.includes(`/servers/${a.id}`)) history.replaceState(null, '', '#/servers'); },
   });
   if (state.modal) Object.assign(state.modal, { kind: 'agent', agentId: Number(a.id) });
+  if (a.ip) {
+    geoLookup(a.ip).then((info) => {
+      if (!state.modal || state.modal.kind !== 'agent' || Number(state.modal.agentId) !== Number(a.id)) return;
+      const el = $('[data-agent-geo]');
+      if (!el) return;
+      if (!info || info.error) {
+        el.textContent = 'IP owner lookup unavailable';
+        return;
+      }
+      const flag = info.country_code ? String.fromCodePoint(...[...info.country_code.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : '';
+      el.textContent = [flag, info.country, info.isp || info.org, info.asn].filter(Boolean).join(' · ');
+    });
+  }
   if (metrics.length >= 2) {
     setTimeout(() => {
       const canvas = $('#agentChart');
@@ -2864,6 +2929,20 @@ async function onDocumentClick(e) {
       }
       case 'clear-filters': state.filters = { status: 'all', search: '' }; renderMonitors(); afterRender(); break;
       case 'new-agent': openAgentForm(); break;
+      case 'restart-agent': {
+        const ok = await confirmAction({ title: 'ری‌استارت ایجنت', message: 'سرویس ایجنت روی سرور ری‌استارت می‌شود و اتصال برای چند ثانیه قطع خواهد شد. ادامه می‌دهید؟', confirmText: 'ری‌استارت' });
+        if (!ok) break;
+        await api(`/api/agents/${id}/command`, { method: 'POST', body: { action: 'restart' } });
+        toast('فرمان ری‌استارت ارسال شد؛ اتصال به‌زودی برمی‌گردد.', 'success');
+        break;
+      }
+      case 'update-agent': {
+        const ok = await confirmAction({ title: 'آپدیت ایجنت', message: 'آخرین نسخهٔ Pulse روی سرور دانلود و جایگزین می‌شود؛ به‌روزرسانی در یک واحد موقت systemd اجرا می‌شود و اتصال لحظه‌ای قطع خواهد شد. ادامه می‌دهید؟', confirmText: 'آپدیت' });
+        if (!ok) break;
+        await api(`/api/agents/${id}/command`, { method: 'POST', body: { action: 'update' } });
+        toast('آپدیت ایجنت شروع شد؛ چند لحظه بعد نسخه را بررسی کنید.', 'success');
+        break;
+      }
       case 'edit-agent': {
         const a = state.agents.find((x) => x.id === id);
         if (a) { closeModal(true); openEditAgent(a); }
@@ -3140,7 +3219,7 @@ async function onDocumentSubmit(e) {
       if (!channels.length) throw new Error('حداقل یک کانال را انتخاب کنید');
       const body = {
         name, trigger,
-        monitor_id: ['down', 'up', 'cert_expiring', 'dns_mismatch'].includes(trigger) ? Number(formVal(form, 'monitor_id')) || 0 : 0,
+        monitor_id: ['down', 'up', 'degraded', 'cert_expiring', 'dns_mismatch'].includes(trigger) ? Number(formVal(form, 'monitor_id')) || 0 : 0,
         threshold: Number(formVal(form, 'threshold')) || 0,
         cooldown_sec: (Number(formVal(form, 'cooldown')) || 0) * 60,
         channels,

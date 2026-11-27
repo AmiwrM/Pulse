@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -396,7 +398,41 @@ func (r *agentRunner) handleCommand(ctx context.Context, cmd *agentproto.PanelCo
 		}
 	case agentproto.CommandError:
 		r.logger.Warn("panel reported a link error", "message", cmd.Message)
+	case agentproto.CommandRestart:
+		r.logger.Info("panel requested an agent restart")
+		go func() {
+			time.Sleep(250 * time.Millisecond)
+			os.Exit(0)
+		}()
+	case agentproto.CommandUpdate:
+		r.logger.Info("panel requested an agent update")
+		go r.runSelfUpdate()
 	}
+}
+
+// runSelfUpdate starts the updater in a transient systemd unit so the current
+// agent process (and its cgroup) can be restarted without killing the updater
+// halfway through replacing the binary.
+func (r *agentRunner) runSelfUpdate() {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		r.logger.Warn("agent self-update failed: executable path is unavailable")
+		return
+	}
+	runner, err := exec.LookPath("systemd-run")
+	if err != nil {
+		r.logger.Warn("agent self-update needs systemd-run", "error", err)
+		return
+	}
+	cmd := exec.Command(runner,
+		"--unit=pulse-agent-update", "--collect", "--quiet",
+		"--property=Type=oneshot", "--", exe, "agent", "update")
+	cmd.Env = append(os.Environ(), "PULSE_AGENT_UPDATE=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.logger.Warn("agent self-update could not start", "error", err, "output", strings.TrimSpace(string(out)))
+		return
+	}
+	r.logger.Info("agent self-update started")
 }
 
 func (r *agentRunner) runRemoteCheck(ctx context.Context, req agentproto.CheckRequest, send func(*agentproto.AgentEvent) error) {

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.7.0
+
+- All panel numbers now use Latin digits, including the Persian UI and charts.
+  Dates remain Jalali in Persian but use Latin digits too.
+- The Logs page is English-only and has a persisted **Auto refresh** switch.
+  Auto refresh is off by default and polls every 4 seconds when enabled.
+- Modals no longer close when the backdrop is clicked, and closing a dialog
+  with unsaved fields asks for confirmation first. Mobile sheets now have a
+  grab handle, use `dvh`, respect the safe area and load with a shorter
+  animation.
+- Fixed the extra left gutter on iPhone/mobile and added safe-area padding.
+- Agent details now show the IP's country, ISP and ASN (ipwho.is with an
+  ip-api fallback, cached for 6 hours).
+- Added **Restart** and **Update** actions for agents in the panel. Restart
+  exits the agent so systemd starts it again; update runs in a transient
+  systemd unit so the updater is not killed when the agent service restarts.
+- Rules now support a **degraded/warning** trigger, with the warning reason
+  included in Telegram, Web Push and webhook notifications.
+- Rounded the favicon corners.
+
 ## 1.6.4
 
 - Pass the VLESS `encryption` value through to the generated Xray outbound.

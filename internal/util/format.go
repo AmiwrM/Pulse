@@ -2,24 +2,14 @@ package util
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
-var persianDigits = [...]rune{'۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'}
-
-// FaDigits converts ASCII digits to Persian digits.
+// FaDigits is kept for compatibility with older formatting call sites. Pulse
+// now uses Latin digits everywhere, including the Persian UI, so this is a
+// no-op.
 func FaDigits(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(persianDigits[r-'0'])
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return s
 }
 
 // JalaliDate converts a Gregorian date to the Jalali calendar.
@@ -52,7 +42,7 @@ func JalaliDate(t time.Time) (int, int, int) {
 
 func two(n int) string { return fmt.Sprintf("%02d", n) }
 
-// FormatDateTime formats a timestamp in Jalali with Persian digits.
+// FormatDateTime formats a timestamp in Jalali with Latin digits.
 func FormatDateTime(ts int64, loc *time.Location) string {
 	if loc == nil {
 		loc = time.UTC

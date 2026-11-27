@@ -4,8 +4,11 @@
       <stop offset="0" stop-color="#0ea5e9"/>
       <stop offset="1" stop-color="#6366f1"/>
     </linearGradient>
+    <clipPath id="rounded"><rect width="512" height="512" rx="116"/></clipPath>
   </defs>
-  <rect width="512" height="512" fill="url(#g)"/>
-  <circle cx="390" cy="80" r="190" fill="#ffffff" opacity=".08"/>
-  <path d="M72 266h92l51-140 77 260 51-152h97" fill="none" stroke="#fff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <g clip-path="url(#rounded)">
+    <rect width="512" height="512" fill="url(#g)"/>
+    <circle cx="390" cy="80" r="190" fill="#ffffff" opacity=".08"/>
+    <path d="M72 266h92l51-140 77 260 51-152h97" fill="none" stroke="#fff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

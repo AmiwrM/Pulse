@@ -1,11 +1,13 @@
 /* Pulse charts — tiny dependency-free canvas charts with hover tooltips. */
-import { getLang } from './i18n.js?v=18';
+import { getLang } from './i18n.js?v=20';
 
 const isEN = () => getLang() === 'en';
-const fa = (s) => isEN() ? String(s) : String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+const fa = (s) => String(s);
 const formatterCache = {};
 function formatter(kind) {
-  const locale = isEN() ? 'en-US' : 'fa-IR';
+  const locale = (kind === 'time' || kind === 'datetime')
+    ? (isEN() ? 'en-US' : 'fa-IR-u-nu-latn')
+    : 'en-US';
   const key = locale + kind;
   if (formatterCache[key]) return formatterCache[key];
   let value;
