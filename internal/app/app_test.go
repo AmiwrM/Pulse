@@ -1,12 +1,42 @@
 package app
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	"pulse/internal/config"
 	"pulse/internal/model"
+	"pulse/internal/store"
 )
+
+func TestMigrateCFAccounts(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "pulse.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	a := &App{db: db}
+	a.migrateCFAccounts(&config.Settings{CloudflareToken: "legacy-token"})
+	accounts, err := db.ListCFAccounts()
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("expected one migrated account, got %+v, %v", accounts, err)
+	}
+	if accounts[0].Token != "legacy-token" || accounts[0].Name != "Default" {
+		t.Fatalf("unexpected migrated account: %+v", accounts[0])
+	}
+	if marker, _ := db.GetSetting("cf_accounts_migrated"); marker != "1" {
+		t.Fatalf("migration marker not set: %q", marker)
+	}
+	if err := db.DeleteCFAccount(accounts[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	a.migrateCFAccounts(&config.Settings{CloudflareToken: "legacy-token"})
+	accounts, _ = db.ListCFAccounts()
+	if len(accounts) != 0 {
+		t.Fatalf("migration must not resurrect a deleted account: %+v", accounts)
+	}
+}
 
 func TestThresholdPass(t *testing.T) {
 	if !thresholdPass(model.Rule{Threshold: 14}, notifyEvent{Trigger: "cert_expiring", Value: 10}) {

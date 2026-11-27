@@ -1,13 +1,13 @@
 /* Pulse PWA service worker */
-const VERSION = 'pulse-v1.7.1';
+const VERSION = 'pulse-v1.8.0';
 const SHELL = [
   '/',
   '/index.html',
-  '/assets/app.css?v=21',
-  '/assets/app.js?v=21',
-  '/assets/charts.js?v=21',
-  '/assets/i18n.js?v=21',
-  '/assets/lang-boot.js?v=21',
+  '/assets/app.css?v=22',
+  '/assets/app.js?v=22',
+  '/assets/charts.js?v=22',
+  '/assets/i18n.js?v=22',
+  '/assets/lang-boot.js?v=22',
   '/fonts/IRANSansWebFaNum.woff2',
   '/fonts/IRANSansWebFaNum_Bold.woff2',
   '/fonts/IRANSansWebFaNum_Medium.woff2',

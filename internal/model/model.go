@@ -33,6 +33,7 @@ type Monitor struct {
 	RecoverThreshold int `json:"recover_threshold"`
 
 	CFEnabled      bool   `json:"cf_enabled"`
+	CFAccountID    int64  `json:"cf_account_id"`
 	CFZoneID       string `json:"cf_zone_id"`
 	CFRecordID     string `json:"cf_record_id"`
 	CFRecordName   string `json:"cf_record_name"`
@@ -215,13 +216,24 @@ type Zone struct {
 }
 
 type DNSRecord struct {
-	ID      string `json:"id"`
-	ZoneID  string `json:"zone_id"`
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	TTL     int    `json:"ttl"`
-	Proxied bool   `json:"proxied"`
+	ID       string `json:"id"`
+	ZoneID   string `json:"zone_id"`
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	TTL      int    `json:"ttl"`
+	Proxied  bool   `json:"proxied"`
+	Priority int    `json:"priority,omitempty"`
+}
+
+// CFAccount is one Cloudflare API token. The token is never returned in JSON.
+type CFAccount struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Token     string `json:"-"`
+	Enabled   bool   `json:"enabled"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 type PushSubscription struct {

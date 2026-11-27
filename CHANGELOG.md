@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.0
+
+- Added **multiple Cloudflare accounts** with create, edit, enable/disable and
+  delete actions. Each account keeps its own token and is never returned to the
+  browser.
+- Added DNS record create, edit and delete from the panel for A, AAAA, CNAME,
+  TXT, MX, NS, SRV and CAA records, including TTL, priority and proxied state.
+- Monitors can now select their own Cloudflare account; automatic failover uses
+  that account instead of a single global token.
+- The legacy single Cloudflare token is migrated to the first account on
+  upgrade, and deleting an account disables monitors that pointed at it.
+- Monitor and server detail modals open immediately with a loading skeleton,
+  then fill in after the API responds. The new-monitor form no longer waits for
+  the agent list before opening.
+- The Cloudflare page paints the account panel first and loads zones/records in
+  the background.
+
 ## 1.7.1
 
 - Removed the remaining Persian digits from UI strings, translation keys,

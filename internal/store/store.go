@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS settings (
 	value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cf_accounts (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL,
+	token TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS monitors (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	name TEXT NOT NULL,
@@ -86,6 +95,7 @@ CREATE TABLE IF NOT EXISTS monitors (
 	fail_threshold INTEGER NOT NULL DEFAULT 2,
 	recover_threshold INTEGER NOT NULL DEFAULT 1,
 	cf_enabled INTEGER NOT NULL DEFAULT 0,
+	cf_account_id INTEGER NOT NULL DEFAULT 0,
 	cf_zone_id TEXT NOT NULL DEFAULT '',
 	cf_record_id TEXT NOT NULL DEFAULT '',
 	cf_record_name TEXT NOT NULL DEFAULT '',
@@ -246,6 +256,10 @@ func (s *Store) migrate() error {
 	var hasProbeAgent int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('monitors') WHERE name='probe_agent_id'`).Scan(&hasProbeAgent); err == nil && hasProbeAgent == 0 {
 		_, _ = s.db.Exec(`ALTER TABLE monitors ADD COLUMN probe_agent_id INTEGER NOT NULL DEFAULT 0`)
+	}
+	var hasCFAccount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('monitors') WHERE name='cf_account_id'`).Scan(&hasCFAccount); err == nil && hasCFAccount == 0 {
+		_, _ = s.db.Exec(`ALTER TABLE monitors ADD COLUMN cf_account_id INTEGER NOT NULL DEFAULT 0`)
 	}
 	now := nowUnix()
 	// Seed the default rule set exactly once. User-deleted rules must stay deleted.

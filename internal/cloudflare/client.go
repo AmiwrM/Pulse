@@ -137,13 +137,14 @@ func (c *Client) ListZones(ctx context.Context) ([]model.Zone, error) {
 }
 
 type rawRecord struct {
-	ID      string `json:"id"`
-	ZoneID  string `json:"zone_id"`
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	TTL     int    `json:"ttl"`
-	Proxied bool   `json:"proxied"`
+	ID       string `json:"id"`
+	ZoneID   string `json:"zone_id"`
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	TTL      int    `json:"ttl"`
+	Proxied  bool   `json:"proxied"`
+	Priority int    `json:"priority,omitempty"`
 }
 
 func (c *Client) ListRecords(ctx context.Context, zoneID, recordType, search string) ([]model.DNSRecord, error) {
@@ -170,7 +171,7 @@ func (c *Client) ListRecords(ctx context.Context, zoneID, recordType, search str
 				continue
 			}
 			out = append(out, model.DNSRecord{
-				ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied,
+				ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority,
 			})
 		}
 		if len(records) < 100 || page >= 5 {
@@ -187,7 +188,50 @@ func (c *Client) GetRecord(ctx context.Context, zoneID, recordID string) (*model
 	if err != nil {
 		return nil, err
 	}
-	return &model.DNSRecord{ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied}, nil
+	return &model.DNSRecord{ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority}, nil
+}
+
+func recordBody(rec model.DNSRecord) map[string]any {
+	body := map[string]any{
+		"type": rec.Type, "name": rec.Name, "content": rec.Content,
+		"ttl": rec.TTL, "proxied": rec.Proxied,
+	}
+	if rec.Priority > 0 {
+		body["priority"] = rec.Priority
+	}
+	return body
+}
+
+func (c *Client) CreateRecord(ctx context.Context, zoneID string, rec model.DNSRecord) (*model.DNSRecord, error) {
+	if zoneID == "" {
+		return nil, fmt.Errorf("شناسه Zone مشخص نیست")
+	}
+	var r rawRecord
+	_, err := c.do(ctx, http.MethodPost, "/zones/"+url.PathEscape(zoneID)+"/dns_records", recordBody(rec), &r)
+	if err != nil {
+		return nil, err
+	}
+	return &model.DNSRecord{ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority}, nil
+}
+
+func (c *Client) UpdateRecord(ctx context.Context, zoneID, recordID string, rec model.DNSRecord) (*model.DNSRecord, error) {
+	if zoneID == "" || recordID == "" {
+		return nil, fmt.Errorf("شناسه Zone و رکورد مشخص نیست")
+	}
+	var r rawRecord
+	_, err := c.do(ctx, http.MethodPut, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), recordBody(rec), &r)
+	if err != nil {
+		return nil, err
+	}
+	return &model.DNSRecord{ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority}, nil
+}
+
+func (c *Client) DeleteRecord(ctx context.Context, zoneID, recordID string) error {
+	if zoneID == "" || recordID == "" {
+		return fmt.Errorf("شناسه Zone و رکورد مشخص نیست")
+	}
+	_, err := c.do(ctx, http.MethodDelete, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), nil, nil)
+	return err
 }
 
 // UpdateRecordContent changes only the content of a DNS record (safe PATCH).
@@ -198,5 +242,5 @@ func (c *Client) UpdateRecordContent(ctx context.Context, zoneID, recordID, cont
 	if err != nil {
 		return nil, err
 	}
-	return &model.DNSRecord{ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied}, nil
+	return &model.DNSRecord{ID: r.ID, ZoneID: r.ZoneID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority}, nil
 }

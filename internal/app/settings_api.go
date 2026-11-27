@@ -17,11 +17,12 @@ import (
 func (a *App) settingsView() map[string]any {
 	conf := a.config()
 	pushCount, _ := a.db.CountPushSubs()
+	cfAccounts, _ := a.db.CountCFAccounts()
 	monitors, checks, agents, dbBytes, _ := a.db.Stats()
 	return map[string]any{
 		"settings":              conf,
 		"telegram_configured":   conf.TelegramToken != "",
-		"cloudflare_configured": conf.CloudflareToken != "",
+		"cloudflare_configured": cfAccounts > 0,
 		"webhook_configured":    conf.WebhookURL != "",
 		"vapid_public":          conf.VAPIDPublic,
 		"push_subscriptions":    pushCount,

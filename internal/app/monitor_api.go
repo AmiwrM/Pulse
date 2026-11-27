@@ -26,6 +26,7 @@ type monitorInput struct {
 	FailThreshold    int             `json:"fail_threshold"`
 	RecoverThreshold int             `json:"recover_threshold"`
 	CFEnabled        bool            `json:"cf_enabled"`
+	CFAccountID      int64           `json:"cf_account_id"`
 	CFZoneID         string          `json:"cf_zone_id"`
 	CFRecordID       string          `json:"cf_record_id"`
 	CFRecordName     string          `json:"cf_record_name"`
@@ -113,6 +114,7 @@ func (in *monitorInput) apply(m *model.Monitor) {
 	m.FailThreshold = in.FailThreshold
 	m.RecoverThreshold = in.RecoverThreshold
 	m.CFEnabled = in.CFEnabled
+	m.CFAccountID = in.CFAccountID
 	m.CFZoneID = in.CFZoneID
 	m.CFRecordID = in.CFRecordID
 	m.CFRecordName = in.CFRecordName
@@ -276,6 +278,10 @@ func (a *App) handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if err := a.validateCFAccount(&in); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
@@ -320,6 +326,10 @@ func (a *App) handleUpdateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.validateProbeAgent(in.ProbeAgentID); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := a.validateCFAccount(&in); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}

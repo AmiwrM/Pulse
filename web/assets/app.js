@@ -1,8 +1,8 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=21';
-import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=21';
+import { lineChart, sparkline } from './charts.js?v=22';
+import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=22';
 
 initI18n();
 
@@ -23,8 +23,11 @@ const state = {
   settingsData: null,
   settingsTab: 'general',
   cfStatus: null,
+  cfAccounts: [],
+  cfAccount: 0,
   cfZones: [],
   cfMonitors: [],
+  cfLoading: false,
   cfZone: '',
   cfRecords: [],
   cfRecordType: '',
@@ -382,6 +385,18 @@ function openModal({ title, subtitle = '', body = '', footer = '', size = '', on
     : (root.querySelector('.modal-body input:not([type=hidden]), .modal-body select, .modal-body textarea, .modal-body button') || root.querySelector('.modal-close'));
   requestAnimationFrame(() => { if (target?.isConnected) target.focus({ preventScroll: true }); });
 }
+function openDetailSkeleton(title, subtitle = '') {
+  let closed = false;
+  openModal({
+    title,
+    subtitle,
+    size: 'lg',
+    body: `<div class="loading-grid">${Array.from({ length: 3 }).map(() => '<div class="panel loading-card skeleton"></div>').join('')}</div>`,
+    onClose: () => { closed = true; },
+  });
+  return { isClosed: () => closed };
+}
+
 function closeModal(silent = false) {
   const root = $('#modal-root');
   if (!root) return;
@@ -1366,17 +1381,20 @@ function renderMonitors() {
 async function openMonitorDetail(id, opts = {}) {
   const guard = ++state.detailEpoch;
   if (state.modal) closeModal(true);
+  const skeleton = openDetailSkeleton('در حال بارگذاری مانیتور…', 'دریافت وضعیت، نمودارها و رخدادها');
   let data;
   try {
     data = await api(`/api/monitors/${id}`);
   } catch (e) {
     if (guard === state.detailEpoch && state.view === 'monitors') {
+      if (!skeleton.isClosed()) closeModal(true);
       toast(e.message, 'error');
       if (parseHash().id === id) history.replaceState(null, '', '#/monitors');
     }
     return;
   }
   if (guard !== state.detailEpoch || state.view !== 'monitors') return;
+  if (skeleton.isClosed()) return;
   const m = data.monitor;
   const checks = data.checks || [];
   const daily = data.daily || [];
@@ -1912,23 +1930,40 @@ function afterRender() {
 }
 
 /* ------------------------------------------------------------------ cloudflare */
+function cfAccountQuery(accountId = state.cfAccount) {
+  const id = Number(accountId) || 0;
+  return id > 0 ? `?account_id=${encodeURIComponent(id)}` : '';
+}
 async function loadCloudflareData() {
   const seq = ++state.cfZoneSeq;
-  state.cfStatus = await api('/api/cloudflare/status');
-  const monitors = await api('/api/monitors');
+  const [status, monitors] = await Promise.all([
+    api(`/api/cloudflare/status${cfAccountQuery()}`),
+    api('/api/monitors'),
+  ]);
   if (seq !== state.cfZoneSeq) return;
+  state.cfStatus = status;
+  state.cfAccounts = status.accounts || [];
+  if (!state.cfAccount || !state.cfAccounts.some((a) => Number(a.id) === Number(state.cfAccount))) {
+    const selected = Number(status.account_id) || 0;
+    state.cfAccount = state.cfAccounts.some((a) => Number(a.id) === selected)
+      ? selected
+      : (Number(state.cfAccounts[0]?.id) || 0);
+  }
   state.cfMonitors = monitors.monitors || [];
   state.cfZones = [];
   state.cfRecords = [];
   state.cfError = '';
-  if (state.cfStatus.connected) {
+  state.cfLoading = !!status.connected;
+  // Paint the account panel immediately; zones and records are network-bound.
+  renderCloudflare();
+  if (status.connected) {
     try {
-      const zones = await api('/api/cloudflare/zones', { timeout: 35000 });
+      const zones = await api(`/api/cloudflare/zones${cfAccountQuery()}`, { timeout: 35000 });
       if (seq !== state.cfZoneSeq) return;
       state.cfZones = zones.zones || [];
       if (state.cfZones.length) {
         if (!state.cfZones.some((z) => z.id === state.cfZone)) state.cfZone = state.cfZones[0].id;
-        const records = await api(`/api/cloudflare/records?zone_id=${encodeURIComponent(state.cfZone)}`, { timeout: 35000 });
+        const records = await api(`/api/cloudflare/records${cfAccountQuery()}${state.cfAccount ? '&' : '?'}zone_id=${encodeURIComponent(state.cfZone)}`, { timeout: 35000 });
         if (seq !== state.cfZoneSeq) return;
         state.cfRecords = records.records || [];
       }
@@ -1936,11 +1971,13 @@ async function loadCloudflareData() {
       state.cfError = e.message;
     }
   }
+  state.cfLoading = false;
   renderCloudflare();
 }
-async function fetchCFRecords(zoneId) {
+async function fetchCFRecords(zoneId, accountId = state.cfAccount) {
   if (!zoneId) return [];
-  const data = await api(`/api/cloudflare/records?zone_id=${encodeURIComponent(zoneId)}`, { timeout: 35000 });
+  const q = Number(accountId) > 0 ? `account_id=${encodeURIComponent(accountId)}&` : '';
+  const data = await api(`/api/cloudflare/records?${q}zone_id=${encodeURIComponent(zoneId)}`, { timeout: 35000 });
   return data.records || [];
 }
 function cfRecordsFiltered() {
@@ -1958,50 +1995,56 @@ function cfRecordRows() {
     <td><span class="type-badge">${esc(r.type)}</span></td>
     <td class="record-name">${esc(r.name)}</td>
     <td class="record-content">${esc(r.content)}</td>
-    <td>${r.proxied ? '<span class="chip amber">Proxied</span>' : '<span class="chip">DNS Only</span>'}</td>
-    <td style="text-align:left"><button class="btn btn-sm btn-ghost" type="button" data-action="cf-edit-record" data-id="${esc(r.id)}">${icon('edit')} تغییر</button></td>
+    <td>${r.proxied ? '<span class="chip amber">Proxied</span>' : '<span class="chip">DNS Only</span>'}${r.priority ? ` <span class="chip">${num(r.priority)}</span>` : ''}</td>
+    <td style="text-align:left;white-space:nowrap"><button class="btn btn-sm btn-ghost" type="button" data-action="cf-edit-record" data-id="${esc(r.id)}">${icon('edit')} تغییر</button><button class="btn btn-sm btn-ghost" type="button" data-action="cf-delete-record" data-id="${esc(r.id)}" data-name="${esc(r.name)}" style="color:var(--danger-text)">${icon('trash')}</button></td>
   </tr>`).join('');
 }
 function renderCloudflare() {
   const status = state.cfStatus || {};
-  const configured = status.configured;
-  const connected = status.connected;
+  const accounts = state.cfAccounts || [];
+  const configured = accounts.length > 0;
+  const connected = !!status.connected;
   const enabled = !!status.enabled;
   const zones = state.cfZones || [];
+  const activeAccount = accounts.find((a) => Number(a.id) === Number(state.cfAccount)) || accounts[0] || null;
   const autoMonitors = state.cfMonitors.filter((m) => m.cf_enabled);
   const stateLabel = connected && enabled ? 'متصل و فعال' : connected ? 'متصل · اتوماسیون خاموش' : configured ? 'اتصال ناموفق' : 'تنظیم نشده';
-  const tokenForm = `
-    <form data-form="cf-token">
-      <div class="form-error"></div>
-      <div class="form-grid">
-        <div class="field full"><label>API Token کلادفلر</label><input class="input ltr" type="password" name="token" autocomplete="off" placeholder="${configured ? 'توکن ذخیره شده است؛ برای تغییر مقدار جدید وارد کنید' : 'مثلاً cf_xxxxxxxxxxxxxxxx'}"><div class="help">توکن را از داشبورد Cloudflare → My Profile → API Tokens بسازید. دسترسی‌های لازم: <b>Zone:Read</b> و <b>DNS:Edit</b>.</div></div>
-        <div class="field full"><label class="check-row"><input type="checkbox" name="enabled" ${configured && status.enabled ? 'checked' : (configured ? '' : 'checked')}> فعال‌سازی اتوماسیون DNS</label></div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" type="submit">${icon('check')} ${configured ? 'ذخیره تغییرات' : 'اتصال به کلادفلر'}</button>${configured ? `<button class="btn btn-danger btn-sm" type="button" data-action="cf-clear-token">${icon('trash')} حذف توکن</button>` : ''}</div>
-    </form>`;
+  const accountRows = accounts.map((a) => `<tr class="${Number(a.id) === Number(state.cfAccount) ? 'cf-account-active' : ''}">
+    <td><button class="btn btn-sm btn-ghost" type="button" data-action="cf-select-account" data-id="${a.id}" style="width:100%;justify-content:flex-start">${icon('cloud')} <b>${esc(a.name)}</b></button></td>
+    <td><span class="chip ${a.enabled ? 'green' : 'red'}">${a.enabled ? 'فعال' : 'غیرفعال'}</span></td>
+    <td style="text-align:left;white-space:nowrap"><button class="btn btn-sm btn-ghost" type="button" data-action="cf-edit-account" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-ghost" type="button" data-action="cf-delete-account" data-id="${a.id}" data-name="${esc(a.name)}" style="color:var(--danger-text)">${icon('trash')}</button></td>
+  </tr>`).join('');
+  const accountPanel = configured ? `<div class="panel panel-pad" style="margin-top:16px">
+    <div class="chart-head"><div><div class="chart-title">${icon('key')} حساب‌های Cloudflare</div><div class="chart-sub">هر حساب توکن و دامنه‌های مستقل خودش را دارد.</div></div><button class="btn btn-sm btn-primary" type="button" data-action="cf-add-account">${icon('plus')} حساب جدید</button></div>
+    <div class="table-wrap"><table class="record-table"><thead><tr><th>حساب</th><th>وضعیت</th><th></th></tr></thead><tbody>${accountRows}</tbody></table></div>
+    ${!connected && status.error ? `<div class="warning-note" style="margin-top:10px">${icon('alert')} <div><b>${esc(activeAccount?.name || 'حساب انتخاب‌شده')}:</b> ${esc(status.error)}</div></div>` : ''}
+  </div>` : `<div class="panel panel-pad" style="margin-top:16px">
+    <div class="chart-head"><div><div class="chart-title">${icon('key')} اتصال امن با API Token</div><div class="chart-sub">برای شروع، یک حساب Cloudflare اضافه کنید. بعداً می‌توانید چند حساب بسازید.</div></div></div>
+    <div class="warning-note">${icon('info')} <div>توکن را از داشبورد Cloudflare → My Profile → API Tokens بسازید. دسترسی‌های لازم: <b>Zone:Read</b> و <b>DNS:Edit</b>.</div></div>
+    <button class="btn btn-primary btn-sm" type="button" data-action="cf-add-account" style="margin-top:12px">${icon('plus')} افزودن حساب Cloudflare</button>
+  </div>`;
 
   $('#view').innerHTML = `
     <section class="panel cf-hero">
       <div class="cf-logo">${icon('cloud')}</div>
       <div class="cf-copy"><h2>${connected ? (enabled ? 'کلادفلر متصل است' : 'کلادفلر متصل است، اتوماسیون خاموش') : configured ? 'اتصال کلادفلر برقرار نیست' : 'سوییچ خودکار DNS'}</h2>
-        <p>${connected ? (enabled ? 'پالس می‌تواند رکوردهای A/AAAA را در زمان قطعی سرویس، به IP پشتیبان منتقل کند و پس از بازیابی برگرداند.' : 'اتصال توکن سالم است اما تغییر خودکار DNS غیرفعال شده است. از بخش مدیریت، دوباره فعال کنید.') : 'با اتصال API، ترمیم خودکار DNS را فعال کنید تا قطعی‌ها بدون دخالت شما مدیریت شوند.'}</p>
+        <p>${connected ? (enabled ? 'پالس می‌تواند رکوردهای A/AAAA را در زمان قطعی سرویس، به IP پشتیبان منتقل کند و پس از بازیابی برگرداند.' : 'اتصال توکن سالم است اما تغییر خودکار DNS غیرفعال شده است. از بخش مدیریت، دوباره فعال کنید.') : configured ? 'حساب انتخاب‌شده در دسترس نیست. توکن یا وضعیت حساب را بررسی کنید.' : 'با اتصال API، ترمیم خودکار DNS را فعال کنید تا قطعی‌ها بدون دخالت شما مدیریت شوند.'}</p>
       </div>
       <div class="cf-status">${connected ? `<span class="status-pill ${enabled ? 'up' : 'paused'}"><span class="sdot"></span>${stateLabel}</span><span class="chip">${num(zones.length)} دامنه</span>` : configured ? `<span class="status-pill down"><span class="sdot"></span>اتصال ناموفق</span><button class="btn btn-sm" type="button" data-action="cf-refresh">${icon('refresh')} بررسی مجدد</button>` : `<span class="status-pill paused"><span class="sdot"></span>تنظیم نشده</span>`}</div>
     </section>
-    ${configured && !connected && status.error ? `<div class="warning-note">${icon('alert')} <div>${esc(status.error)}</div></div>` : ''}
     ${state.cfError ? `<div class="warning-note">${icon('alert')} <div>${esc(state.cfError)}</div></div>` : ''}
-    ${!configured || !connected ? `<div class="panel panel-pad" style="margin-top:16px"><div class="chart-title" style="margin-bottom:12px">${icon('key')} ${configured ? 'توکن را به‌روزرسانی کنید' : 'اتصال امن با API Token'}</div>${tokenForm}</div>` : ''}
+    ${accountPanel}
     ${connected ? `
-      <div class="cf-grid">
+      <div class="cf-grid" style="margin-top:16px">
         <div class="panel panel-pad">
-          <div class="chart-head"><div><div class="chart-title">${icon('network')} مرورگر رکوردهای DNS</div><div class="chart-sub">تغییر دستی یا بررسی مقادیر فعلی</div></div><button class="btn btn-sm" type="button" data-action="cf-refresh">${icon('refresh')} بروزرسانی</button></div>
+          <div class="chart-head"><div><div class="chart-title">${icon('network')} رکوردهای DNS ${activeAccount ? `· ${esc(activeAccount.name)}` : ''}</div><div class="chart-sub">ساخت، ویرایش یا حذف رکورد در حساب انتخاب‌شده</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" type="button" data-action="cf-add-record">${icon('plus')} رکورد جدید</button><button class="btn btn-sm" type="button" data-action="cf-refresh">${icon('refresh')} بروزرسانی</button></div></div>
           <div class="cf-zone-bar">
             <div class="field"><label>دامنه / Zone</label><select class="select" id="cf-zone">${zones.map((z) => `<option value="${esc(z.id)}" ${z.id === state.cfZone ? 'selected' : ''}>${esc(z.name)}</option>`).join('') || '<option value="">دامنه‌ای پیدا نشد</option>'}</select></div>
-            <div class="field"><label>نوع</label><select class="select" id="cf-record-type"><option value="">همه</option>${['A', 'AAAA', 'CNAME'].map((t) => `<option value="${t}" ${state.cfRecordType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+            <div class="field"><label>نوع</label><select class="select" id="cf-record-type"><option value="">همه</option>${['A', 'AAAA', 'CNAME', 'TXT', 'MX'].map((t) => `<option value="${t}" ${state.cfRecordType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
             <div class="field"><label>جستجو</label><input class="input" id="cf-search" value="${esc(state.cfSearch)}" placeholder="نام یا IP…"></div>
           </div>
-          <div class="table-wrap"><table class="record-table"><thead><tr><th>نوع</th><th>نام</th><th>مقدار</th><th>حالت</th><th></th></tr></thead><tbody id="cf-records-body">${cfRecordRows()}</tbody></table></div>
-          ${zones.length ? '' : `<div class="empty" style="padding:20px"><p>هیچ Zone در حساب کلادفلر پیدا نشد.</p></div>`}
+          ${state.cfLoading ? `<div class="loading-grid">${Array.from({ length: 2 }).map(() => '<div class="panel loading-card skeleton"></div>').join('')}</div>` : `<div class="table-wrap"><table class="record-table"><thead><tr><th>نوع</th><th>نام</th><th>مقدار</th><th>حالت</th><th></th></tr></thead><tbody id="cf-records-body">${cfRecordRows()}</tbody></table></div>
+          ${zones.length ? '' : `<div class="empty" style="padding:20px"><p>هیچ Zone در این حساب Cloudflare پیدا نشد.</p></div>`}`}
         </div>
         <div class="cf-side">
           <div class="panel auto-switch-card">
@@ -2018,8 +2061,7 @@ function renderCloudflare() {
           </div>
         </div>
       </div>
-      <div class="panel panel-pad" style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chart-title">${icon('key')} مدیریت اتصال</span><span class="help" style="flex:1">${enabled ? 'اتوماسیون DNS فعال است.' : 'اتوماسیون DNS خاموش است؛ می‌توانید بدون تغییر توکن دوباره فعالش کنید.'}</span>${enabled ? `<button class="btn btn-sm btn-danger" type="button" data-action="cf-disable">${icon('pause')} غیرفعال‌سازی اتوماسیون</button>` : `<button class="btn btn-sm btn-primary" type="button" data-action="cf-enable">${icon('play')} فعال‌سازی اتوماسیون</button>`}<button class="btn btn-sm" type="button" data-action="cf-show-token-form">${icon('key')} تغییر توکن</button><button class="btn btn-sm btn-danger" type="button" data-action="cf-clear-token">${icon('trash')} حذف توکن</button></div>
-      <div id="cf-token-slot" class="hidden"></div>
+      <div class="panel panel-pad" style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chart-title">${icon('key')} مدیریت اتصال</span><span class="help" style="flex:1">${enabled ? 'اتوماسیون DNS فعال است.' : 'اتوماسیون DNS خاموش است؛ می‌توانید بدون تغییر توکن دوباره فعالش کنید.'}</span>${enabled ? `<button class="btn btn-sm btn-danger" type="button" data-action="cf-disable">${icon('pause')} غیرفعال‌سازی اتوماسیون</button>` : `<button class="btn btn-sm btn-primary" type="button" data-action="cf-enable">${icon('play')} فعال‌سازی اتوماسیون</button>`}<button class="btn btn-sm" type="button" data-action="cf-edit-account" data-id="${activeAccount?.id || ''}">${icon('key')} تغییر توکن</button></div>
     ` : ''}`;
   wireLabels($('#view'));
 }
@@ -2279,7 +2321,7 @@ function renderSettings() {
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.7.1')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.8.0')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -2371,21 +2413,27 @@ function targetMeta(type) {
   }
   return { label: 'هدف', placeholder: '', hint: '' };
 }
-async function ensureCFZones() {
-  if (state.cfZones.length) return state.cfZones;
-  if (!state.cfStatus) state.cfStatus = await api('/api/cloudflare/status');
-  if (!state.cfStatus.connected) return [];
-  const data = await api('/api/cloudflare/zones');
-  state.cfZones = data.zones || [];
-  return state.cfZones;
+async function ensureCFAccounts() {
+  if (state.cfAccounts?.length) return state.cfAccounts;
+  const data = await api('/api/cloudflare/accounts');
+  state.cfAccounts = data.accounts || [];
+  return state.cfAccounts;
 }
-async function populateCFRecordSelect(form, zoneId, selectedId = '', fallbackName = '', fallbackPrimary = '') {
+async function ensureCFZones(accountId = state.cfAccount) {
+  const id = Number(accountId) || 0;
+  const data = await api(`/api/cloudflare/zones${id > 0 ? `?account_id=${encodeURIComponent(id)}` : ''}`, { timeout: 35000 });
+  const zones = data.zones || [];
+  if (!id || id === Number(state.cfAccount)) state.cfZones = zones;
+  return zones;
+}
+async function populateCFRecordSelect(form, zoneId, selectedId = '', fallbackName = '', fallbackPrimary = '', accountId = 0) {
   const sel = form.querySelector('#m-cf-record');
   if (!sel) return;
   if (!zoneId) { sel.innerHTML = '<option value="">ابتدا Zone را انتخاب کنید</option>'; return; }
   sel.innerHTML = '<option value="">در حال دریافت رکوردها…</option>';
+  const q = Number(accountId) > 0 ? `account_id=${encodeURIComponent(accountId)}&` : '';
   try {
-    const data = await api(`/api/cloudflare/records?zone_id=${encodeURIComponent(zoneId)}`);
+    const data = await api(`/api/cloudflare/records?${q}zone_id=${encodeURIComponent(zoneId)}`);
     const records = (data.records || []).filter((r) => ['A', 'AAAA'].includes(r.type));
     let html = '<option value="">انتخاب رکورد…</option>';
     let found = false;
@@ -2402,23 +2450,33 @@ async function populateCFRecordSelect(form, zoneId, selectedId = '', fallbackNam
   }
 }
 async function hydrateCFSelects(form, monitor) {
+  const accountSel = form.querySelector('#m-cf-account');
   const zoneSel = form.querySelector('#m-cf-zone');
   if (!zoneSel) return;
+  const note = form.querySelector('#m-cf-note');
   try {
-    const zones = await ensureCFZones();
+    const accounts = await ensureCFAccounts();
+    if (accountSel) {
+      accountSel.innerHTML = accounts.length
+        ? accounts.map((a) => `<option value="${a.id}" ${a.enabled ? '' : 'data-disabled="1"'}>${esc(a.name)}${a.enabled ? '' : ' · غیرفعال'}</option>`).join('')
+        : '<option value="">حساب Cloudflare ثبت نشده</option>';
+      const preferred = Number(monitor?.cf_account_id) || Number(state.cfAccount) || Number(accounts[0]?.id) || 0;
+      if (preferred && accounts.some((a) => Number(a.id) === preferred)) accountSel.value = String(preferred);
+    }
+    const accountID = Number(accountSel?.value) || 0;
+    const zones = accountID ? await ensureCFZones(accountID) : [];
     if (!zones.length) {
-      zoneSel.innerHTML = '<option value="">کلادفلر متصل نیست</option>';
-      const note = form.querySelector('#m-cf-note');
-      if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:var(--link-text)">کلادفلر را متصل کنید</a>.`;
+      zoneSel.innerHTML = '<option value="">دامنه‌ای پیدا نشد</option>';
+      if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:var(--link-text)">یک حساب کلادفلر و دامنه اضافه کنید</a>.`;
       return;
     }
     zoneSel.innerHTML = '<option value="">انتخاب Zone…</option>' + zones.map((z) => `<option value="${esc(z.id)}" ${z.id === monitor?.cf_zone_id ? 'selected' : ''}>${esc(z.name)}</option>`).join('');
-    if (monitor?.cf_zone_id) zoneSel.value = monitor.cf_zone_id;
+    if (monitor?.cf_zone_id && zones.some((z) => z.id === monitor.cf_zone_id)) zoneSel.value = monitor.cf_zone_id;
     if (!zoneSel.value && zones[0]) zoneSel.value = zones[0].id;
-    if (zoneSel.value) await populateCFRecordSelect(form, zoneSel.value, monitor?.cf_record_id || '', monitor?.cf_record_name || '', monitor?.cf_primary || '');
+    if (zoneSel.value) await populateCFRecordSelect(form, zoneSel.value, monitor?.cf_record_id || '', monitor?.cf_record_name || '', monitor?.cf_primary || '', accountID);
+    if (note) note.innerHTML = `رکوردهای A/AAAA حساب «${esc(accounts.find((a) => Number(a.id) === accountID)?.name || '')}».`;
   } catch (e) {
     zoneSel.innerHTML = `<option value="">${esc('کلادفلر متصل نیست')}</option>`;
-    const note = form.querySelector('#m-cf-note');
     if (note) note.innerHTML = `برای استفاده از سوییچ خودکار ابتدا <a href="#/cloudflare" style="color:var(--link-text)">کلادفلر را متصل کنید</a>.`;
   }
 }
@@ -2451,11 +2509,6 @@ async function openMonitorForm(monitor = null) {
   if (typeof m === 'number') {
     try { m = (await api(`/api/monitors/${m}`)).monitor; } catch (e) { toast(e.message, 'error'); return; }
   }
-  try {
-    const data = await api('/api/agents');
-    state.agents = data.agents || [];
-    state.agentsOfflineAfter = data.offline_after_sec || state.agentsOfflineAfter;
-  } catch { /* keep the cached agent list */ }
   const cfg = m?.config && typeof m.config === 'object' ? m.config : {};
   const type = m?.type || 'http';
   const target = targetMeta(type);
@@ -2498,6 +2551,7 @@ async function openMonitorForm(monitor = null) {
       <label class="check-row" style="margin-bottom:8px"><input type="checkbox" name="cf_enabled" id="m-cf-enabled" ${hasCF ? 'checked' : ''}> در صورت قطعی، رکورد Cloudflare به IP پشتیبان تغییر کند</label>
       <div class="cf-extra ${hasCF ? '' : 'hidden'}" id="m-cf-extra">
         <div class="form-grid">
+          <div class="field"><label>حساب Cloudflare</label><select class="select" id="m-cf-account" name="cf_account_id"><option value="">در حال دریافت…</option></select></div>
           <div class="field"><label>Zone</label><select class="select" id="m-cf-zone"><option value="">در حال دریافت…</option></select><div class="help" id="m-cf-note">برای تغییر، ابتدا کلادفلر را متصل کنید.</div></div>
           <div class="field"><label>رکورد A/AAAA</label><select class="select" id="m-cf-record"><option value="">ابتدا Zone را انتخاب کنید</option></select></div>
           <div class="field"><label>IP اصلی</label><input class="input ltr" name="cf_primary" id="m-cf-primary" value="${esc(m?.cf_primary || '')}" placeholder="1.2.3.4"></div>
@@ -2526,6 +2580,23 @@ async function openMonitorForm(monitor = null) {
   });
   if (hasCF || !m) hydrateCFSelects(form, m);
   if (type === 'proxy') refreshXrayHint();
+  // The modal must not wait for the agent list. Refresh it in the background
+  // and keep the current selection if the user already changed it.
+  if (!(state.agents || []).length) {
+    api('/api/agents').then((data) => {
+      state.agents = data.agents || [];
+      state.agentsOfflineAfter = data.offline_after_sec || state.agentsOfflineAfter;
+      const sel = form.querySelector('#m-probe-agent');
+      if (!sel) return;
+      const current = Number(sel.value) || 0;
+      sel.innerHTML = [
+        `<option value="0" ${current ? '' : 'selected'}>پنل اصلی (همین سرور)</option>`,
+        ...(state.agents || []).map((a) => `<option value="${a.id}" ${Number(a.id) === current ? 'selected' : ''}>${esc(a.name)}${statusFromAgent(a) ? '' : ' · آفلاین'}</option>`),
+      ].join('');
+      sel.value = String(current);
+      updateProbeAgentHelp(form, form.querySelector('#m-type')?.value || 'http');
+    }).catch(() => {});
+  }
 }
 async function refreshXrayHint() {
   const el = $('#xray-hint');
@@ -2708,15 +2779,18 @@ function openAgentToken(data, title = 'ایجنت آماده نصب است') {
 async function openAgentDetail(id, opts = {}) {
   const guard = ++state.detailEpoch;
   if (state.modal) closeModal(true);
+  const skeleton = openDetailSkeleton('در حال بارگذاری سرور…', 'دریافت منابع، سرویس‌ها و تاریخچه');
   let data;
   try { data = await api(`/api/agents/${id}/metrics?hours=${opts.hours || 24}`); } catch (e) {
     if (guard === state.detailEpoch && state.view === 'servers') {
+      if (!skeleton.isClosed()) closeModal(true);
       toast(e.message, 'error');
       if (parseHash().id === id) history.replaceState(null, '', '#/servers');
     }
     return;
   }
   if (guard !== state.detailEpoch || state.view !== 'servers') return;
+  if (skeleton.isClosed()) return;
   const a = data.agent;
   const metrics = data.metrics || [];
   state.agentHours = opts.hours || 24;
@@ -2826,21 +2900,59 @@ function openPasswordForm() {
     footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">انصراف</button><button class="btn btn-primary btn-sm" type="submit" form="password-form">${icon('key')} تغییر رمز</button>`,
   });
 }
-function openCFRecordForm(record) {
+function openCFAccountForm(account = null) {
+  let a = account;
+  if (typeof a === 'number') a = state.cfAccounts.find((x) => Number(x.id) === a) || null;
+  const editing = !!a?.id;
   openModal({
-    title: 'تغییر مقدار رکورد',
-    subtitle: `${record.name} (${record.type})`,
-    body: `<form id="cf-record-form" data-form="cf-record" data-id="${esc(record.id)}"><div class="form-error"></div><input type="hidden" name="zone_id" value="${esc(record.zone_id)}"><div class="field"><label>مقدار جدید</label><input class="input ltr" name="content" value="${esc(record.content)}" required><div class="help">این تغییر فوراً روی کلادفلر اعمال می‌شود.</div></div></form>`,
-    footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">انصراف</button><button class="btn btn-primary btn-sm" type="submit" form="cf-record-form">${icon('check')} اعمال تغییر</button>`,
+    title: editing ? 'ویرایش حساب Cloudflare' : 'حساب Cloudflare جدید',
+    subtitle: editing ? a.name : 'توکن را با دسترسی Zone:Read و DNS:Edit بسازید',
+    body: `<form id="cf-account-form" data-form="cf-account" data-id="${a?.id || ''}" novalidate>
+      <div class="form-error"></div>
+      <div class="form-grid">
+        <div class="field full"><label>نام حساب <span class="req">*</span></label><input class="input" name="name" value="${esc(a?.name || '')}" placeholder="مثلاً حساب اصلی" required autocomplete="off"></div>
+        <div class="field full"><label>API Token ${editing ? '' : '<span class="req">*</span>'}</label><input class="input ltr" type="password" name="token" placeholder="${editing ? 'برای تغییر توکن، مقدار جدید را وارد کنید' : 'cf_xxxxxxxxxxxxxxxx'}" ${editing ? '' : 'required'} autocomplete="off"><div class="help">${editing ? 'اگر خالی بماند، توکن فعلی حفظ می‌شود.' : 'توکن از Cloudflare → My Profile → API Tokens ساخته می‌شود.'}</div></div>
+        <div class="field full"><label class="check-row"><input type="checkbox" name="enabled" ${!a || a.enabled ? 'checked' : ''}> این حساب برای اتوماسیون DNS فعال باشد</label></div>
+      </div>
+    </form>`,
+    footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">انصراف</button><button class="btn btn-primary btn-sm" type="submit" form="cf-account-form">${icon('check')} ${editing ? 'ذخیره تغییرات' : 'تأیید و افزودن'}</button>`,
   });
 }
-function openCFTokenForm() {
+function openCFTokenForm() { openCFAccountForm(Number(state.cfAccount) || null); }
+
+function openCFRecordForm(record = null) {
+  const r = record || {};
+  const zoneId = r.zone_id || state.cfZone;
+  if (!zoneId) { toast('ابتدا یک دامنه / Zone انتخاب کنید', 'error'); return; }
+  const editing = !!r.id;
+  const type = r.type || 'A';
   openModal({
-    title: 'تغییر توکن کلادفلر',
-    subtitle: 'توکن جدید با دسترسی Zone:Read و DNS:Edit',
-    body: `<form id="cf-token-modal" data-form="cf-token"><div class="form-error"></div><div class="field"><label>API Token جدید</label><input class="input ltr" type="password" name="token" placeholder="cf_..." required autocomplete="off"></div><div class="field" style="margin-top:8px"><label class="check-row"><input type="checkbox" name="enabled" checked> اتوماسیون DNS فعال باشد</label></div></form>`,
-    footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">انصراف</button><button class="btn btn-primary btn-sm" type="submit" form="cf-token-modal">ذخیره</button>`,
+    title: editing ? 'ویرایش رکورد DNS' : 'رکورد DNS جدید',
+    subtitle: editing ? `${r.name} (${r.type})` : 'تغییرات فوراً روی Cloudflare اعمال می‌شود',
+    body: `<form id="cf-record-form" data-form="cf-record" data-id="${esc(r.id || '')}" novalidate>
+      <div class="form-error"></div>
+      <input type="hidden" name="account_id" value="${Number(state.cfAccount) || ''}">
+      <input type="hidden" name="zone_id" value="${esc(zoneId)}">
+      <div class="form-grid">
+        <div class="field"><label>نوع رکورد</label><select class="select" name="type" id="cf-record-form-type">${['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'NS', 'SRV', 'CAA'].map((t) => `<option value="${t}" ${type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="field"><label>TTL</label><input class="input" type="number" min="1" name="ttl" value="${Number(r.ttl) || 1}"><div class="help">1 = خودکار</div></div>
+        <div class="field full"><label>نام <span class="req">*</span></label><input class="input ltr" name="name" value="${esc(r.name || '')}" placeholder="example.com یا sub" required></div>
+        <div class="field full"><label>مقدار <span class="req">*</span></label><input class="input ltr" name="content" value="${esc(r.content || '')}" placeholder="1.2.3.4 یا target.example.com" required></div>
+        <div class="field" id="cf-record-priority-field"><label>Priority</label><input class="input" type="number" min="0" name="priority" value="${Number(r.priority) || (type === 'MX' ? 10 : 0)}" placeholder="10"></div>
+        <div class="field" id="cf-record-proxied-field"><label class="check-row" style="margin-top:25px"><input type="checkbox" name="proxied" ${r.proxied ? 'checked' : ''}> عبور از Proxy کلادفلر</label></div>
+      </div>
+    </form>`,
+    footer: `<button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">انصراف</button><button class="btn btn-primary btn-sm" type="submit" form="cf-record-form">${icon('check')} ${editing ? 'ذخیره رکورد' : 'ساخت رکورد'}</button>`,
   });
+  const form = $('#cf-record-form');
+  const typeEl = form?.querySelector('#cf-record-form-type');
+  const update = () => {
+    const t = typeEl?.value || 'A';
+    form?.querySelector('#cf-record-priority-field')?.classList.toggle('hidden', !['MX', 'SRV'].includes(t));
+    form?.querySelector('#cf-record-proxied-field')?.classList.toggle('hidden', !['A', 'AAAA', 'CNAME'].includes(t));
+  };
+  typeEl?.addEventListener('change', update);
+  update();
 }
 
 /* ------------------------------------------------------------------ UI helpers */
@@ -3015,7 +3127,10 @@ async function onDocumentClick(e) {
       case 'edit-monitor': {
         if (location.hash.includes('/monitors/')) history.replaceState(null, '', '#/monitors');
         closeModal(true);
-        await openMonitorForm(id);
+        const cached = (state.monitors || []).find((m) => Number(m.id) === id)
+          || (state.summary?.monitors || []).find((m) => Number(m.id) === id);
+        if (cached) openMonitorForm(cached);
+        else await openMonitorForm(id);
         break;
       }
       case 'delete-monitor': {
@@ -3100,6 +3215,35 @@ async function onDocumentClick(e) {
       }
       case 'cf-refresh': await loadCloudflareData(); toast('وضعیت کلادفلر بروزرسانی شد', 'info'); break;
       case 'cf-show-token-form': openCFTokenForm(); break;
+      case 'cf-add-account': openCFAccountForm(); break;
+      case 'cf-edit-account': openCFAccountForm(Number(actionEl.dataset.id) || null); break;
+      case 'cf-select-account':
+        state.cfAccount = Number(actionEl.dataset.id) || 0;
+        state.cfZone = '';
+        state.cfRecords = [];
+        state.cfError = '';
+        await loadCloudflareData();
+        break;
+      case 'cf-delete-account': {
+        const accName = actionEl.dataset.name || 'این حساب';
+        const ok = await confirmAction({ title: 'حذف حساب Cloudflare', message: `حساب «${accName}» حذف شود؟ مانیتورهای متصل به آن غیرفعال می‌شوند.`, confirmText: 'حذف حساب', danger: true });
+        if (!ok) break;
+        await api(`/api/cloudflare/accounts/${id}`, { method: 'DELETE' });
+        state.cfAccount = 0;
+        toast('حساب Cloudflare حذف شد', 'success');
+        await loadCloudflareData();
+        break;
+      }
+      case 'cf-add-record': openCFRecordForm(); break;
+      case 'cf-delete-record': {
+        const recName = actionEl.dataset.name || 'این رکورد';
+        const ok = await confirmAction({ title: 'حذف رکورد DNS', message: `رکورد «${recName}» از Cloudflare حذف شود؟`, confirmText: 'حذف رکورد', danger: true });
+        if (!ok) break;
+        await api(`/api/cloudflare/records/${encodeURIComponent(actionEl.dataset.id)}?${Number(state.cfAccount) > 0 ? `account_id=${state.cfAccount}&` : ''}zone_id=${encodeURIComponent(state.cfZone)}`, { method: 'DELETE' });
+        toast('رکورد DNS حذف شد', 'success');
+        await loadCloudflareData();
+        break;
+      }
       case 'xray-detect': {
         const result = await api('/api/xray/detect', { method: 'POST', body: {} });
         const st = result.status || {};
@@ -3252,9 +3396,35 @@ async function onDocumentChange(e) {
     }
     return;
   }
+  if (el.id === 'm-cf-account') {
+    const form = $('#monitor-form');
+    if (!form) return;
+    const accountID = Number(el.value) || 0;
+    const zoneSel = form.querySelector('#m-cf-zone');
+    const note = form.querySelector('#m-cf-note');
+    if (zoneSel) zoneSel.innerHTML = '<option value="">در حال دریافت…</option>';
+    try {
+      const zones = accountID ? await ensureCFZones(accountID) : [];
+      if (zoneSel) zoneSel.innerHTML = zones.length
+        ? '<option value="">انتخاب Zone…</option>' + zones.map((z) => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join('')
+        : '<option value="">دامنه‌ای پیدا نشد</option>';
+      if (zoneSel && zones[0]) {
+        zoneSel.value = zones[0].id;
+        await populateCFRecordSelect(form, zoneSel.value, '', '', '', accountID);
+      } else {
+        const recordSel = form.querySelector('#m-cf-record');
+        if (recordSel) recordSel.innerHTML = '<option value="">ابتدا Zone را انتخاب کنید</option>';
+      }
+      if (note) note.textContent = zones.length ? 'رکوردهای A/AAAA حساب انتخاب‌شده.' : 'برای این حساب دامنه‌ای پیدا نشد.';
+    } catch (e) {
+      if (zoneSel) zoneSel.innerHTML = '<option value="">دریافت دامنه‌ها ناموفق بود</option>';
+      if (note) note.textContent = e.message;
+    }
+    return;
+  }
   if (el.id === 'm-cf-zone') {
     const form = $('#monitor-form');
-    if (form) await populateCFRecordSelect(form, el.value, '', '', '');
+    if (form) await populateCFRecordSelect(form, el.value, '', '', '', Number(form.querySelector('#m-cf-account')?.value) || 0);
     return;
   }
   if (el.id === 'm-cf-record') {
@@ -3331,7 +3501,9 @@ async function onDocumentSubmit(e) {
       const recOpt = recordSel?.selectedOptions?.[0];
       const cfZone = form.querySelector('#m-cf-zone')?.value || '';
       const cfRecord = recordSel?.value || '';
+      const cfAccount = Number(form.querySelector('#m-cf-account')?.value) || 0;
       if (cfEnabled && (!cfZone || !cfRecord)) throw new Error('برای سوییچ خودکار DNS، Zone و رکورد را انتخاب کنید');
+      if (cfEnabled && !cfAccount) throw new Error('ابتدا یک حساب Cloudflare انتخاب کنید');
       const body = {
         name, type, target, group: formVal(form, 'group'), config: cfg,
         probe_agent_id: Number(formVal(form, 'probe_agent_id')) || 0,
@@ -3341,6 +3513,7 @@ async function onDocumentSubmit(e) {
         fail_threshold: Number(formVal(form, 'fail_threshold')) || 2,
         recover_threshold: Number(formVal(form, 'recover_threshold')) || 1,
         cf_enabled: cfEnabled,
+        cf_account_id: cfAccount,
         cf_zone_id: cfEnabled ? cfZone : '',
         cf_record_id: cfEnabled ? cfRecord : '',
         cf_record_name: cfEnabled ? (recOpt?.dataset.name || '') : '',
@@ -3406,23 +3579,37 @@ async function onDocumentSubmit(e) {
       toast('رمز عبور تغییر کرد', 'success');
       return;
     }
-    if (mode === 'cf-token') {
+    if (mode === 'cf-account') {
+      const id = Number(form.dataset.id) || 0;
+      const name = formVal(form, 'name');
       const token = formVal(form, 'token');
-      if (!token && !state.cfStatus?.configured) throw new Error('توکن API الزامی است');
-      const body = { cloudflare_enabled: formChecked(form, 'enabled') };
-      if (token) body.cloudflare_token = token;
-      await api('/api/settings', { method: 'PUT', body });
+      if (!name) throw new Error('نام حساب الزامی است');
+      if (!id && !token) throw new Error('توکن API الزامی است');
+      const body = { name, enabled: formChecked(form, 'enabled') };
+      if (token) body.token = token;
+      const data = await api(id ? `/api/cloudflare/accounts/${id}` : '/api/cloudflare/accounts', { method: id ? 'PUT' : 'POST', body });
+      if (!id && data.account?.id) state.cfAccount = Number(data.account.id);
       closeModal(true);
-      toast('تنظیمات کلادفلر ذخیره شد', 'success');
+      toast(id ? 'حساب Cloudflare به‌روزرسانی شد' : 'حساب Cloudflare اضافه شد', 'success');
       await loadCloudflareData();
       return;
     }
     if (mode === 'cf-record') {
-      const content = formVal(form, 'content');
-      if (!content) throw new Error('مقدار جدید الزامی است');
-      await api('/api/cloudflare/update', { method: 'POST', body: { zone_id: formVal(form, 'zone_id'), record_id: form.dataset.id, content } });
+      const id = formVal(form, 'id') || form.dataset.id;
+      const body = {
+        account_id: Number(formVal(form, 'account_id')) || 0,
+        zone_id: formVal(form, 'zone_id'),
+        type: formVal(form, 'type'),
+        name: formVal(form, 'name'),
+        content: formVal(form, 'content'),
+        ttl: Number(formVal(form, 'ttl')) || 1,
+        proxied: formChecked(form, 'proxied'),
+        priority: Number(formVal(form, 'priority')) || 0,
+      };
+      if (!body.name || !body.content) throw new Error('نام و مقدار رکورد الزامی است');
+      await api(id ? `/api/cloudflare/records/${encodeURIComponent(id)}` : '/api/cloudflare/records', { method: id ? 'PUT' : 'POST', body });
       closeModal(true);
-      toast('رکورد DNS تغییر کرد', 'success');
+      toast(id ? 'رکورد DNS ذخیره شد' : 'رکورد DNS ساخته شد', 'success');
       await loadCloudflareData();
       return;
     }

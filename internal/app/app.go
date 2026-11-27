@@ -22,7 +22,6 @@ import (
 
 	"pulse/internal/agentproto"
 	"pulse/internal/checker"
-	"pulse/internal/cloudflare"
 	"pulse/internal/config"
 	"pulse/internal/notify"
 	"pulse/internal/store"
@@ -137,6 +136,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 5 * time.Second, PermitWithoutStream: true}),
 	)
 	agentproto.RegisterServer(a.grpc, a)
+	a.migrateCFAccounts(conf)
 	a.logger.Info("panel initialized", "addr", cfg.Addr, "db", cfg.DBPath)
 	a.logFor("xray").Info("xray status", "available", xrayStatus.Available,
 		"version", xrayStatus.Version, "path", xrayStatus.Path, "error", xrayStatus.Error)
@@ -170,8 +170,6 @@ func (a *App) pushSender() *notify.PushSender {
 	}
 	return &notify.PushSender{PublicKey: c.VAPIDPublic, PrivateKey: c.VAPIDPrivate, Subject: subject}
 }
-
-func (a *App) cf() *cloudflare.Client { return cloudflare.New(a.config().CloudflareToken) }
 
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -215,8 +213,15 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/agents/{id}", a.requireAuth(a.handleDeleteAgent))
 
 	mux.HandleFunc("GET /api/cloudflare/status", a.requireAuth(a.handleCFStatus))
+	mux.HandleFunc("GET /api/cloudflare/accounts", a.requireAuth(a.handleCFAccounts))
+	mux.HandleFunc("POST /api/cloudflare/accounts", a.requireAuth(a.handleCFCreateAccount))
+	mux.HandleFunc("PUT /api/cloudflare/accounts/{id}", a.requireAuth(a.handleCFUpdateAccount))
+	mux.HandleFunc("DELETE /api/cloudflare/accounts/{id}", a.requireAuth(a.handleCFDeleteAccount))
 	mux.HandleFunc("GET /api/cloudflare/zones", a.requireAuth(a.handleCFZones))
 	mux.HandleFunc("GET /api/cloudflare/records", a.requireAuth(a.handleCFRecords))
+	mux.HandleFunc("POST /api/cloudflare/records", a.requireAuth(a.handleCFCreateRecord))
+	mux.HandleFunc("PUT /api/cloudflare/records/{id}", a.requireAuth(a.handleCFUpdateRecord))
+	mux.HandleFunc("DELETE /api/cloudflare/records/{id}", a.requireAuth(a.handleCFDeleteRecord))
 	mux.HandleFunc("POST /api/cloudflare/update", a.requireAuth(a.handleCFUpdate))
 
 	mux.HandleFunc("GET /api/settings", a.requireAuth(a.handleGetSettings))

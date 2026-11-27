@@ -95,6 +95,48 @@ func TestMonitorProbeAgentAndDelete(t *testing.T) {
 	}
 }
 
+func TestCFAccountsAndMonitorUnlink(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	acc := &model.CFAccount{Name: "main", Token: "token", Enabled: true}
+	if err := db.CreateCFAccount(acc); err != nil {
+		t.Fatal(err)
+	}
+	if acc.ID == 0 {
+		t.Fatal("account id was not assigned")
+	}
+	first, err := db.FirstCFAccount()
+	if err != nil || first == nil || first.Name != "main" {
+		t.Fatalf("first account: %+v, %v", first, err)
+	}
+	m := &model.Monitor{
+		Name: "Cloudflare target", Type: "http", Target: "https://example.com", Enabled: true,
+		Interval: 60, Timeout: 5000, FailThreshold: 2, RecoverThreshold: 1,
+		CFEnabled: true, CFAccountID: acc.ID, CFZoneID: "z1", CFRecordID: "r1",
+		CFPrimary: "1.2.3.4", CFFailover: "5.6.7.8", Config: []byte(`{}`),
+	}
+	if err := db.CreateMonitor(m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetMonitor(m.ID)
+	if err != nil || got == nil || got.CFAccountID != acc.ID {
+		t.Fatalf("monitor account: %+v, %v", got, err)
+	}
+	if err := db.DeleteCFAccount(acc.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.GetMonitor(m.ID)
+	if err != nil || got == nil {
+		t.Fatalf("monitor after account delete: %+v, %v", got, err)
+	}
+	if got.CFEnabled || got.CFAccountID != 0 {
+		t.Fatalf("account delete must disable automation, got enabled=%v account=%d", got.CFEnabled, got.CFAccountID)
+	}
+}
+
 func TestApplicationLogs(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
 	if err != nil {
