@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.3
+
+- Fixed `pulse update` rejecting a freshly downloaded release. The binary run
+  from the updater's temporary file printed that file name (for example
+  `.pulse-update-123 1.6.2`) instead of `pulse 1.6.2`, so the version check
+  failed. `--version` now always reports `pulse` (or `pulse-agent` when invoked
+  through the agent applet), independent of the file name.
+- Added a regression test for the updater's version output.
+
 ## 1.6.2
 
 - Fixed a proxy monitoring bug where one dead endpoint in a subscription could

@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestAppletDisplayName(t *testing.T) {
+	cases := map[string]string{
+		"/usr/local/bin/pulse":       "pulse",
+		"/usr/local/bin/pulse-agent": "pulse-agent",
+		"pulse-a.exe":                "pulse-a",
+		".pulse-update-2154844603":   "pulse",
+		"/tmp/pulse-linux-amd64":     "pulse",
+	}
+	for argv0, want := range cases {
+		if got := appletDisplayName(argv0); got != want {
+			t.Errorf("appletDisplayName(%q) = %q, want %q", argv0, got, want)
+		}
+	}
+}
+
 func TestChecksumFor(t *testing.T) {
 	sums := `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  pulse-linux-amd64
 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  pulse-linux-arm64

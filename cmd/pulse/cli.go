@@ -36,6 +36,17 @@ func isAgentApplet(name string) bool {
 	return name == "pulse-agent" || name == "pulse-a"
 }
 
+// appletDisplayName returns the stable name used by `--version`. The updater
+// runs the downloaded binary under a temporary name, so the temp file name
+// must never leak into the version output.
+func appletDisplayName(argv0 string) string {
+	name := strings.TrimSuffix(strings.ToLower(filepath.Base(argv0)), ".exe")
+	if name == "pulse-agent" || name == "pulse-a" {
+		return name
+	}
+	return "pulse"
+}
+
 func serviceTargetFor(agent bool) serviceTarget {
 	if agent {
 		return serviceTarget{unit: "pulse-agent", label: "Pulse agent"}
@@ -117,7 +128,7 @@ func handleManagementCLI(args []string) bool {
 	case "port":
 		return handlePort(rest[1:], agentTarget)
 	case "version", "--version", "-v":
-		fmt.Printf("%s %s\n", strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe"), version)
+		fmt.Printf("%s %s\n", appletDisplayName(os.Args[0]), version)
 		return true
 	default:
 		if appletAgent {
