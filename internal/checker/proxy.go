@@ -29,6 +29,35 @@ type proxyConfig struct {
 	MaxRealNodes  int    `json:"max_real_nodes"`
 }
 
+const (
+	// A single dead endpoint in a subscription must not consume the whole
+	// monitor timeout: the fast transport probe only decides whether to try the
+	// real Xray test, so it is capped per node.
+	fastProbeTimeout = 6 * time.Second
+	// Keep in sync with the concurrency passed to Engine.TestNodes.
+	proxyTestConcurrency = 4
+	// Per-node Xray test budget (engine.testNode uses 14s) plus scheduling
+	// headroom, used to size the overall proxy check timeout.
+	proxyTestWaveBudget = 15 * time.Second
+)
+
+// proxyCheckTimeoutFloor returns a timeout large enough to run the configured
+// number of real Xray tests in waves. The old fixed 45s cap caused the last
+// nodes to be skipped whenever many handshakes were slow.
+func proxyCheckTimeoutFloor(raw json.RawMessage) time.Duration {
+	var c proxyConfig
+	_ = decodeConfig(raw, &c)
+	maxReal := c.MaxRealNodes
+	if maxReal <= 0 {
+		maxReal = 10
+	}
+	if maxReal > 30 {
+		maxReal = 30
+	}
+	waves := (maxReal + proxyTestConcurrency - 1) / proxyTestConcurrency
+	return time.Duration(waves)*proxyTestWaveBudget + 15*time.Second
+}
+
 type ProxyNode struct {
 	Name        string `json:"name"`
 	Protocol    string `json:"protocol"`
@@ -181,7 +210,7 @@ func (m *Manager) checkProxy(ctx context.Context, mon model.Monitor) Result {
 					for _, idx := range selected {
 						specs = append(specs, *nodes[idx].XrayNode)
 					}
-					results, err := engine.TestNodes(ctx, specs, testURL, 4)
+					results, err := engine.TestNodes(ctx, specs, testURL, proxyTestConcurrency)
 					if err != nil {
 						meta["real_test_error"] = err.Error()
 						warnings = append(warnings, "تست واقعی ناموفق ماند: "+err.Error())
@@ -397,6 +426,7 @@ func parseVMess(line string) (ProxyNode, bool) {
 	path := mapStr(obj, "path")
 	fp := mapStr(obj, "fp")
 	alpn := splitList(mapStr(obj, "alpn"))
+	mode := mapStr(obj, "mode")
 	tlsOn := strings.EqualFold(mapStr(obj, "tls"), "tls") || strings.EqualFold(mapStr(obj, "tls"), "reality")
 	sni := mapStr(obj, "sni")
 	if sni == "" {
@@ -416,7 +446,7 @@ func parseVMess(line string) (ProxyNode, bool) {
 			Name: name, Protocol: "vmess", Address: host, Port: port,
 			UUID: id, AlterID: mapInt(obj, "aid"), Network: network, HeaderType: headerType,
 			Security: "none", SNI: sni, HostHeader: hostHeader, Path: path,
-			Fingerprint: fp, ALPN: alpn,
+			Fingerprint: fp, ALPN: alpn, Mode: mode,
 		}
 		if tlsOn {
 			x.Security = "tls"
@@ -451,6 +481,7 @@ func parseVLESS(line string) (ProxyNode, bool) {
 	serviceName := firstNonEmpty(q.Get("serviceName"), q.Get("service_name"))
 	flow := q.Get("flow")
 	fp := q.Get("fp")
+	mode := q.Get("mode")
 	pbk := firstNonEmpty(q.Get("pbk"), q.Get("publicKey"))
 	sid := firstNonEmpty(q.Get("sid"), q.Get("shortId"))
 	spx := firstNonEmpty(q.Get("spx"), q.Get("spiderX"))
@@ -468,7 +499,7 @@ func parseVLESS(line string) (ProxyNode, bool) {
 			Name: name, Protocol: "vless", Address: u.Hostname(), Port: port,
 			UUID: u.User.Username(), Flow: flow, Network: network, HeaderType: q.Get("headerType"),
 			Security: security, SNI: sni, HostHeader: hostHeader, Path: path, ServiceName: serviceName,
-			Fingerprint: fp, PublicKey: pbk, ShortID: sid, SpiderX: spx, ALPN: splitList(q.Get("alpn")),
+			Fingerprint: fp, PublicKey: pbk, ShortID: sid, SpiderX: spx, ALPN: splitList(q.Get("alpn")), Mode: mode,
 		}
 		if security == "xtls" {
 			x.Security = "tls"
@@ -498,6 +529,7 @@ func parseTrojan(line string) (ProxyNode, bool) {
 	}
 	network := strings.ToLower(firstNonEmpty(q.Get("type"), q.Get("net"), "tcp"))
 	sni := firstNonEmpty(q.Get("sni"), q.Get("peer"), q.Get("host"), u.Hostname())
+	mode := q.Get("mode")
 	name := fragmentName(u)
 	if name == "" {
 		name = "Trojan " + net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
@@ -512,7 +544,7 @@ func parseTrojan(line string) (ProxyNode, bool) {
 			Name: name, Protocol: "trojan", Address: u.Hostname(), Port: port,
 			Password: u.User.Username(), Network: network, HeaderType: q.Get("headerType"),
 			Security: security, SNI: sni, HostHeader: q.Get("host"), Path: q.Get("path"),
-			ServiceName: q.Get("serviceName"), Fingerprint: q.Get("fp"), ALPN: splitList(q.Get("alpn")),
+			ServiceName: q.Get("serviceName"), Fingerprint: q.Get("fp"), ALPN: splitList(q.Get("alpn")), Mode: mode,
 		}
 		if security == "xtls" {
 			x.Security = "tls"
@@ -806,7 +838,7 @@ func mapInt(m map[string]any, key string) int {
 
 func xrayNetworkOK(network string) bool {
 	switch strings.ToLower(network) {
-	case "", "tcp", "raw", "ws", "grpc", "gun", "http", "h2", "h2c", "httpupgrade", "kcp", "mkcp", "quic":
+	case "", "tcp", "raw", "ws", "grpc", "gun", "http", "h2", "h2c", "httpupgrade", "kcp", "mkcp", "quic", "xhttp", "splithttp":
 		return true
 	}
 	return false
@@ -877,6 +909,12 @@ func parseClashNodes(text string) []ProxyNode {
 }
 
 func testNode(ctx context.Context, n ProxyNode, skipTLS bool) ProxyNode {
+	return testNodeWithTimeout(ctx, n, skipTLS, fastProbeTimeout)
+}
+
+func testNodeWithTimeout(parent context.Context, n ProxyNode, skipTLS bool, timeout time.Duration) ProxyNode {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	start := time.Now()
 	if n.UDP {
 		n.Method = "udp"

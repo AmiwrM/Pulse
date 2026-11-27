@@ -1,5 +1,5 @@
 /* Pulse PWA service worker */
-const VERSION = 'pulse-v1.6.1';
+const VERSION = 'pulse-v1.6.2';
 const SHELL = [
   '/',
   '/index.html',

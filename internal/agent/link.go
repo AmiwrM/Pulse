@@ -413,11 +413,11 @@ func (r *agentRunner) runRemoteCheck(ctx context.Context, req agentproto.CheckRe
 	if timeout < 2*time.Second {
 		timeout = 2 * time.Second
 	}
-	if req.Type == "proxy" && timeout < 45*time.Second {
-		timeout = 45 * time.Second
-	}
-	if timeout > 3*time.Minute {
+	if req.Type == "proxy" && timeout < 3*time.Minute {
 		timeout = 3 * time.Minute
+	}
+	if timeout > 3*time.Minute+30*time.Second {
+		timeout = 3*time.Minute + 30*time.Second
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

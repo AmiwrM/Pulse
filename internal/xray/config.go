@@ -30,6 +30,7 @@ type Node struct {
 	HostHeader  string
 	Path        string
 	ServiceName string
+	Mode        string
 	Fingerprint string
 	PublicKey   string
 	ShortID     string
@@ -254,6 +255,19 @@ func streamSettings(n Node) (map[string]any, error) {
 		}
 		ss["network"] = "httpupgrade"
 		ss["httpupgradeSettings"] = hu
+	case "xhttp", "splithttp":
+		xhttp := map[string]any{}
+		if n.Path != "" {
+			xhttp["path"] = n.Path
+		}
+		if n.HostHeader != "" {
+			xhttp["host"] = n.HostHeader
+		}
+		if n.Mode != "" {
+			xhttp["mode"] = n.Mode
+		}
+		ss["network"] = "xhttp"
+		ss["xhttpSettings"] = xhttp
 	case "kcp", "mkcp":
 		header := n.HeaderType
 		if header == "" {

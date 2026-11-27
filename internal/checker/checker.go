@@ -79,9 +79,12 @@ func (m *Manager) Run(parent context.Context, mon model.Monitor) Result {
 		timeout = 2 * time.Second
 	}
 	// Real Xray handshakes need time to start temporary cores and perform an
-	// actual request through each node.
-	if mon.Type == "proxy" && timeout < 45*time.Second {
-		timeout = 45 * time.Second
+	// actual request through each node. Size the window from max_real_nodes so
+	// a large subscription does not get its last nodes skipped.
+	if mon.Type == "proxy" {
+		if floor := proxyCheckTimeoutFloor(mon.Config); timeout < floor {
+			timeout = floor
+		}
 	}
 	if timeout > 3*time.Minute {
 		timeout = 3 * time.Minute

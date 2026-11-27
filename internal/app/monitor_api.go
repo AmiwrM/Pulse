@@ -515,8 +515,8 @@ func (a *App) startCheck(m model.Monitor) bool {
 		if timeout < 15*time.Second {
 			timeout = 15 * time.Second
 		}
-		if m.Type == "proxy" && timeout < 90*time.Second {
-			timeout = 90 * time.Second
+		if m.Type == "proxy" && timeout < 3*time.Minute+30*time.Second {
+			timeout = 3*time.Minute + 30*time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()

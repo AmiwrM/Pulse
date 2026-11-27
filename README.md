@@ -10,7 +10,13 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.6.1
+### خلاصهٔ نسخهٔ 1.6.2
+
+- رفع باگ مهم در مانیتور کانفیگ‌ها: یک کانفیگ مرده دیگر نمی‌تواند با timeout در مرحلهٔ probe سریع TCP، تمام مهلت بررسی را مصرف کند و مانع اجرای تست واقعی Xray برای بقیهٔ کانفیگ‌ها شود؛ هر probe حداکثر ۶ ثانیه طول می‌کشد.
+- مهلت بررسی پروکسی بر اساس «حداکثر کانفیگ برای تست واقعی» محاسبه می‌شود (تا ۳ دقیقه) تا کانفیگ‌های آخرِ ساب‌سکریپشن‌های بزرگ skip نشوند.
+- پشتیبانی از ترنسپورت XHTTP/SplitHTTP (`type=xhttp` یا `splithttp` با path/host/mode) در تست واقعی Xray.
+
+**بهبودهای نصب‌کننده در 1.6.1:**
 
 - نصب‌کنندهٔ پنل و ایجنت حالا منتظر قفل apt/dpkg می‌ماند (تا ۱۰ دقیقه) و عملیات را دوباره تلاش می‌کند؛ اجرای هم‌زمان `unattended-upgrades` یا `cloud-init` دیگر نصب را متوقف نمی‌کند.
 - نصب‌کننده نسخهٔ Caddy را بررسی می‌کند و در صورت قدیمی‌بودن، Caddy 2.6+ را از مخزن رسمی نصب می‌کند؛ اگر Caddy قدیمی `h2c` را نپذیرد، کانفیگ WebSocket جایگزین نوشته می‌شود تا HTTPS و اتصال ایجنت از کار نیفتد.
@@ -143,8 +149,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.6.1
-git push origin v1.6.1
+git tag v1.6.2
+git push origin v1.6.2
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -157,7 +163,7 @@ git push origin v1.6.1
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.6.1 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.6.2 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -187,7 +193,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 # پنل
 pulse start | stop | restart | status
 pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
-pulse update [--release v1.6.1] [--no-restart]
+pulse update [--release v1.6.2] [--no-restart]
 pulse port                       # نمایش پورت فعلی
 pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
 pulse uninstall [--purge] [--yes]
@@ -208,8 +214,8 @@ pulse-agent version
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.6.1
-pulse-agent update --release v1.6.1
+pulse update --release v1.6.2
+pulse-agent update --release v1.6.2
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -608,6 +614,7 @@ sudo bash -c 'set -a; . /etc/pulse/agent.env; set +a; /usr/local/bin/pulse --age
 - عبور واقعی ترافیک و خروج از سرور پروکسی
 - تأخیر واقعی درخواست از داخل تونل
 - خطاهای دقیق در صورت اشتباه بودن UUID، رمز، Reality، SNI یا شبکه
+- ترنسپورت‌های TCP/RAW، WebSocket، gRPC، HTTPUpgrade، KCP، QUIC و XHTTP/SplitHTTP
 
 ### نصب و به‌روزرسانی
 
@@ -632,8 +639,8 @@ sudo bash /tmp/pulse-install.sh --force-xray --xray-version v26.11.9
 - **اجرای تست از** را انتخاب کنید: پنل اصلی یا یک ایجنت آنلاین. برای تست از شبکهٔ ایران، ایجنت همان سرور را انتخاب کنید.
 - **هندشیک واقعی با Xray** روشن باشد (پیش‌فرض).
 - **آدرس تست اتصال** را وارد کنید؛ پیش‌فرض `https://www.gstatic.com/generate_204` است. این آدرس باید از سمت سرور پروکسی قابل دسترس باشد و کد 2xx/3xx برگرداند.
-- **حداکثر کانفیگ برای تست واقعی** را برای سابسکریپشن‌های بزرگ محدود کنید (پیش‌فرض ۱۰ کانفیگ).
-- مهلت بررسی پروکسی حداقل ۹۰ ثانیه در نظر گرفته می‌شود؛ هر کانفیگ در نهایت حداکثر ۱۴ ثانیه فرصت دارد.
+- **حداکثر کانفیگ برای تست واقعی** را برای ساب‌سکریپشن‌های بزرگ محدود کنید (پیش‌فرض ۱۰ کانفیگ؛ برای ساب ۱۳تایی مقدار ۳۰ بگذارید).
+- مهلت بررسی پروکسی بر اساس همین تعداد محاسبه می‌شود (تا ۳ دقیقه)؛ probe سریع هر کانفیگ حداکثر ۶ ثانیه و تست واقعی هر کانفیگ حداکثر ۱۴ ثانیه فرصت دارد.
 
 اگر Xray نصب نباشد یا اجرا نشود، مانیتور به‌جای نمایش سبز کاذب، وضعیت **هشدار** می‌گیرد و در جزئیات، دلیل عدم انجام تست واقعی و روش fallback را نشان می‌دهد.
 
@@ -799,7 +806,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.6.1` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.6.2` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -838,8 +845,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.6.1
-git push origin v1.6.1
+git tag v1.6.2
+git push origin v1.6.2
 ```
 
 ---
@@ -849,6 +856,8 @@ git push origin v1.6.1
 | مشکل | راه‌حل |
 |---|---|
 | نصب با خطای `Could not get lock /var/lib/dpkg/lock-frontend` متوقف می‌شود | نسخهٔ 1.6.1+ خودش تا ۱۰ دقیقه منتظر قفل می‌ماند و دوباره تلاش می‌کند. اگر باز هم تکرار شد: `sudo systemctl stop unattended-upgrades`، سپس `sudo dpkg --configure -a` و `sudo apt-get -f install` را اجرا و نصب را دوباره شروع کنید. |
+| همه یا بیشتر کانفیگ‌ها TCP می‌شوند و `real_tested` صفر است | در نسخه‌های قبل از 1.6.2 یک کانفیگ مرده می‌توانست کل مهلت probe سریع را مصرف کند و تست‌های Xray شروع نشوند. به 1.6.2+ آپدیت کنید، `max_real_nodes` را ۳۰ بگذارید و آدرس تست را قابل‌دسترس از سمت سرور پروکسی انتخاب کنید. |
+| کانفیگ Reality تست واقعی نمی‌شود و پیام «کلید عمومی Reality (pbk)» دارد | لینک VLESS Reality باید پارامتر `pbk` (یا `publicKey`) داشته باشد. اگر ساب‌سکریپشن آن را حذف کرده، از لینک اصلی/پنل سازنده یا فرمت Base64 دیگر استفاده کنید. |
 | Ping خطای دسترسی می‌دهد | در Docker: `cap_add: NET_RAW`. در systemd: `AmbientCapabilities=CAP_NET_RAW` یا `sudo setcap cap_net_raw+ep $(which ping)`. |
 | Web Push روی آیفون کار نمی‌کند | پنل باید HTTPS باشد و از صفحهٔ اصلی (PWA) باز شود، نه تب Safari. iOS 16.4+. |
 | تلگرام پیام نمی‌فرستد | توکن را تست کنید؛ ربات را در کانال ادمین کنید؛ Chat ID را بررسی کنید. طبق قوانین تلگرام، ربات تا زمانی که کاربر به آن پیام نداده نمی‌تواند شروع کند. |

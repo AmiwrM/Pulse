@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"pulse/internal/model"
 )
@@ -71,10 +73,11 @@ func TestParseProxyNodes(t *testing.T) {
 		"trojan://pass@trojan.example.com:8443?security=tls&sni=trojan.example.com#Trojan",
 		"ss://" + ssUser + "@ss.example.com:8388#SS",
 		"hysteria2://auth@hy.example.com:443#Hysteria",
+		"vless://11111111-2222-3333-4444-555555555555@cdn.example.com:443?security=tls&type=xhttp&sni=cdn.example.com&host=cdn.example.com&path=%2Fx&mode=auto#XHTTP",
 	}, "\n")
 	nodes := parseProxyNodes(input)
-	if len(nodes) != 5 {
-		t.Fatalf("expected 5 nodes, got %d: %+v", len(nodes), nodes)
+	if len(nodes) != 6 {
+		t.Fatalf("expected 6 nodes, got %d: %+v", len(nodes), nodes)
 	}
 	if nodes[0].Name != "VMess Node" || !nodes[0].TLS {
 		t.Errorf("unexpected vmess node: %+v", nodes[0])
@@ -102,6 +105,68 @@ func TestParseProxyNodes(t *testing.T) {
 	}
 	if !nodes[4].UDP {
 		t.Errorf("hysteria2 should use UDP probe: %+v", nodes[4])
+	}
+	if nodes[5].XrayNode == nil || nodes[5].XrayNode.Network != "xhttp" || nodes[5].XrayNode.Mode != "auto" {
+		t.Errorf("xhttp real-test spec missing: %+v", nodes[5].XrayNode)
+	}
+}
+
+func TestProxyCheckTimeoutFloor(t *testing.T) {
+	cases := []struct {
+		maxReal int
+		want    time.Duration
+	}{
+		{0, 60 * time.Second},
+		{1, 30 * time.Second},
+		{4, 30 * time.Second},
+		{5, 45 * time.Second},
+		{10, 60 * time.Second},
+		{30, 135 * time.Second},
+	}
+	for _, c := range cases {
+		raw, _ := json.Marshal(map[string]any{"max_real_nodes": c.maxReal})
+		if got := proxyCheckTimeoutFloor(raw); got != c.want {
+			t.Errorf("proxyCheckTimeoutFloor(max=%d) = %s, want %s", c.maxReal, got, c.want)
+		}
+	}
+}
+
+func TestFastProbeTimeoutIsBounded(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+
+	start := time.Now()
+	done := make(chan ProxyNode, 1)
+	go func() {
+		done <- testNodeWithTimeout(context.Background(), ProxyNode{
+			Protocol: "vless", Address: ln.Addr().String(), TLS: true, SNI: "example.com",
+		}, true, 150*time.Millisecond)
+	}()
+	select {
+	case node := <-done:
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("fast probe took %s, expected the per-node cap", elapsed)
+		}
+		if node.OK {
+			t.Fatalf("expected the stalled TLS probe to fail: %+v", node)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fast probe did not honor its timeout")
+	}
+	select {
+	case conn := <-accepted:
+		_ = conn.Close()
+	case <-time.After(time.Second):
 	}
 }
 

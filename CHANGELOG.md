@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.2
+
+- Fixed a proxy monitoring bug where one dead endpoint in a subscription could
+  consume the entire fast TCP probe phase. All real Xray tests then started
+  with an expired context and were skipped, leaving every node on TCP. Each
+  fast probe is now capped at 6 seconds.
+- Proxy check timeouts are now sized from `max_real_nodes` (up to 3 minutes)
+  instead of a fixed 45 seconds, and the scheduler/agent allow the same window.
+  This prevents the last nodes of a large subscription from being skipped.
+- Added XHTTP/SplitHTTP transport support to real Xray tests
+  (`type=xhttp`/`splithttp`, with path, host and mode).
+
 ## 1.6.1
 
 - The installer (panel and agent) now waits for the apt/dpkg lock instead of
