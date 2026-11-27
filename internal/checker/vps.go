@@ -18,13 +18,16 @@ import (
 )
 
 type virtualizorConfig struct {
-	PanelURL        string  `json:"panel_url"`
-	APIKey          string  `json:"api_key"`
-	APIPass         string  `json:"api_pass"`
-	VPSID           int     `json:"vps_id"`
-	SkipTLSVerify   bool    `json:"skip_tls_verify"`
-	WarnPercent     float64 `json:"warn_percent"`
-	CriticalPercent float64 `json:"critical_percent"`
+	PanelURL            string  `json:"panel_url"`
+	APIKey              string  `json:"api_key"`
+	APIPass             string  `json:"api_pass"`
+	VPSID               int     `json:"vps_id"`
+	SkipTLSVerify       bool    `json:"skip_tls_verify"`
+	ThresholdMode       string  `json:"threshold_mode"`
+	WarnPercent         float64 `json:"warn_percent"`
+	CriticalPercent     float64 `json:"critical_percent"`
+	WarnRemainingGB     float64 `json:"warn_remaining_gb"`
+	CriticalRemainingGB float64 `json:"critical_remaining_gb"`
 }
 
 type virtualizorVPS struct {
@@ -58,14 +61,30 @@ func (m *Manager) checkVirtualizor(ctx context.Context, mon model.Monitor) Resul
 	if !strings.HasPrefix(c.PanelURL, "http://") && !strings.HasPrefix(c.PanelURL, "https://") {
 		return Result{Error: "آدرس پنل Virtualizor باید با http:// یا https:// شروع شود"}
 	}
-	if c.WarnPercent <= 0 || c.WarnPercent >= 100 {
-		c.WarnPercent = 80
+	mode := strings.ToLower(strings.TrimSpace(c.ThresholdMode))
+	if mode != "remaining" {
+		mode = "percent"
 	}
-	if c.CriticalPercent <= 0 || c.CriticalPercent > 100 {
-		c.CriticalPercent = 95
-	}
-	if c.CriticalPercent < c.WarnPercent {
-		c.CriticalPercent = c.WarnPercent
+	if mode == "remaining" {
+		if c.WarnRemainingGB <= 0 {
+			c.WarnRemainingGB = 10
+		}
+		if c.CriticalRemainingGB <= 0 {
+			c.CriticalRemainingGB = 2
+		}
+		if c.CriticalRemainingGB > c.WarnRemainingGB {
+			c.CriticalRemainingGB = c.WarnRemainingGB
+		}
+	} else {
+		if c.WarnPercent <= 0 || c.WarnPercent >= 100 {
+			c.WarnPercent = 80
+		}
+		if c.CriticalPercent <= 0 || c.CriticalPercent > 100 {
+			c.CriticalPercent = 95
+		}
+		if c.CriticalPercent < c.WarnPercent {
+			c.CriticalPercent = c.WarnPercent
+		}
 	}
 
 	start := time.Now()
@@ -97,7 +116,10 @@ func (m *Manager) checkVirtualizor(ctx context.Context, mon model.Monitor) Resul
 		"provider": "virtualizor", "panel": c.PanelURL, "vps_id": c.VPSID,
 		"hostname": hostname, "status": status, "suspended": suspended,
 		"used_gb": round2(used), "limit_gb": round2(limit), "remaining_gb": round2(remaining),
-		"percent": round1(percent), "net_in": anyFloat(entry.NetIn), "net_out": anyFloat(entry.NetOut),
+		"percent": round1(percent), "threshold_mode": mode,
+		"warn_percent": c.WarnPercent, "critical_percent": c.CriticalPercent,
+		"warn_remaining_gb": c.WarnRemainingGB, "critical_remaining_gb": c.CriticalRemainingGB,
+		"net_in": anyFloat(entry.NetIn), "net_out": anyFloat(entry.NetOut),
 	}
 	res := Result{LatencyMS: latency, Meta: meta}
 	switch {
@@ -105,10 +127,16 @@ func (m *Manager) checkVirtualizor(ctx context.Context, mon model.Monitor) Resul
 		res.Error = fmt.Sprintf("VPS %s suspended است", fallbackStr(hostname, fmt.Sprint(c.VPSID)))
 	case !running:
 		res.Error = fmt.Sprintf("VPS %s روشن نیست (status=%s)", fallbackStr(hostname, fmt.Sprint(c.VPSID)), status)
-	case limit > 0 && percent >= c.CriticalPercent:
+	case limit > 0 && mode == "remaining" && remaining <= c.CriticalRemainingGB:
+		res.Error = fmt.Sprintf("ترافیک VPS %s بحرانی است: فقط %.1f GB از %.1f GB باقی مانده", fallbackStr(hostname, fmt.Sprint(c.VPSID)), remaining, limit)
+		res.Meta["traffic_state"] = "critical"
+	case limit > 0 && mode == "remaining" && remaining <= c.WarnRemainingGB:
+		res.Warn = fmt.Sprintf("ترافیک VPS %s کم است: %.1f GB از %.1f GB باقی مانده", fallbackStr(hostname, fmt.Sprint(c.VPSID)), remaining, limit)
+		res.Meta["traffic_state"] = "warning"
+	case limit > 0 && mode == "percent" && percent >= c.CriticalPercent:
 		res.Error = fmt.Sprintf("ترافیک VPS %s بحرانی است: %.1f%% از %.1f GB مصرف شده", fallbackStr(hostname, fmt.Sprint(c.VPSID)), percent, limit)
 		res.Meta["traffic_state"] = "critical"
-	case limit > 0 && percent >= c.WarnPercent:
+	case limit > 0 && mode == "percent" && percent >= c.WarnPercent:
 		res.Warn = fmt.Sprintf("ترافیک VPS %s به %.1f%% رسیده است (%.1f از %.1f GB)", fallbackStr(hostname, fmt.Sprint(c.VPSID)), percent, used, limit)
 		res.Meta["traffic_state"] = "warning"
 	default:

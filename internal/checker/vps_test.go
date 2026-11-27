@@ -37,6 +37,30 @@ func TestPickVirtualizorVPS(t *testing.T) {
 	}
 }
 
+func TestCheckVirtualizorRemainingThreshold(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"VPS Statistics","vps_data":{"K_4":{"vpsid":4,"hostname":"vm1.example.com","status":1,"used_bandwidth":490,"bandwidth":500}}}`))
+	}))
+	defer srv.Close()
+	cfg, _ := json.Marshal(map[string]any{
+		"panel_url": srv.URL, "api_key": "key", "api_pass": "secret", "vps_id": 4,
+		"threshold_mode": "remaining", "warn_remaining_gb": 20, "critical_remaining_gb": 5,
+	})
+	res := (&Manager{}).checkVirtualizor(context.Background(), model.Monitor{Type: "vps", Config: cfg})
+	if res.Meta["traffic_state"] != "warning" || res.Warn == "" {
+		t.Fatalf("expected remaining warning, got %+v", res)
+	}
+	cfg, _ = json.Marshal(map[string]any{
+		"panel_url": srv.URL, "api_key": "key", "api_pass": "secret", "vps_id": 4,
+		"threshold_mode": "remaining", "warn_remaining_gb": 20, "critical_remaining_gb": 12,
+	})
+	res = (&Manager{}).checkVirtualizor(context.Background(), model.Monitor{Type: "vps", Config: cfg})
+	if res.Meta["traffic_state"] != "critical" || res.Error == "" {
+		t.Fatalf("expected remaining critical, got %+v", res)
+	}
+}
+
 func TestCheckVirtualizor(t *testing.T) {
 	var authErr error
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

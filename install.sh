@@ -19,7 +19,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.8.1"
+INSTALLER_VERSION="1.9.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 BRANCH="${PULSE_BRANCH:-main}"
 REPO_URL="https://github.com/${REPO_SLUG}"
@@ -672,8 +672,36 @@ UNIT
   chmod 0644 /etc/systemd/system/pulse.service
 }
 
+# Allow the panel (running as the unprivileged pulse user) to request a port
+# change from Settings. The path unit runs the real command as root.
+write_port_helper() {
+  cat >/etc/systemd/system/pulse-port.service <<'UNIT'
+[Unit]
+Description=Apply a Pulse panel port change requested from the UI
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'f=/var/lib/pulse/port-request; test -f "$f" || exit 0; p=$(head -c 16 "$f" | tr -cd "0-9"); rm -f "$f"; test -n "$p" || exit 0; exec /usr/local/bin/pulse port "$p"'
+UNIT
+  cat >/etc/systemd/system/pulse-port.path <<'UNIT'
+[Unit]
+Description=Watch for Pulse panel port change requests
+
+[Path]
+PathChanged=/var/lib/pulse/port-request
+Unit=pulse-port.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  chmod 0644 /etc/systemd/system/pulse-port.service /etc/systemd/system/pulse-port.path
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now pulse-port.path >/dev/null 2>&1 || true
+}
+
 # Start on loopback first; create the admin account before exposing the panel.
 write_unit "127.0.0.1:$PORT"
+write_port_helper
 touch /etc/pulse/pulse.env
 if grep -qE '^PULSE_(PUBLIC_BASE_URL|XRAY_BIN)=' /etc/pulse/pulse.env 2>/dev/null; then
   sed -E '/^PULSE_(PUBLIC_BASE_URL|XRAY_BIN)=/d' /etc/pulse/pulse.env >"$TMPDIR_INSTALL/pulse.env"
@@ -863,8 +891,8 @@ echo "   pulse status"
 echo "   pulse restart"
 echo "   pulse logs"
 echo "   pulse update"
-echo "   pulse-agent status"
-echo "   pulse-agent update"
+echo "   pulse-a status"
+echo "   pulse-a update"
 if [[ "$USE_SSL" == "yes" ]]; then echo "   journalctl -u caddy -f"; fi
 echo "   Source: $REPO_URL"
 echo "   Open ports 80/443 in your provider firewall when using HTTPS."

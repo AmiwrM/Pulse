@@ -230,6 +230,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/test/webhook", a.requireAuth(a.handleTestWebhook))
 	mux.HandleFunc("GET /api/xray/status", a.requireAuth(a.handleXrayStatus))
 	mux.HandleFunc("POST /api/xray/detect", a.requireAuth(a.handleXrayDetect))
+	mux.HandleFunc("POST /api/system/port", a.requireAuth(a.handleChangePanelPort))
 
 	mux.HandleFunc("GET /api/push/config", a.requireAuth(a.handlePushConfig))
 	mux.HandleFunc("POST /api/push/subscribe", a.requireAuth(a.handlePushSubscribe))

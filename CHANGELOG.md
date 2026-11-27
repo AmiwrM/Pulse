@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.0
+
+- Virtualizor traffic thresholds can use either used percentage or remaining
+  GB, with separate warning and critical values.
+- Settings tabs are centered and restyled; the desktop sidebar can collapse to
+  an icon rail and remembers its state.
+- Unified the agent CLI on `pulse-a` in the UI, installer output and docs.
+  `pulse-agent` remains as a compatibility alias.
+- Agent public-IP detection now prefers valid IPv4 addresses, and REST reports
+  keep the agent-reported IP instead of replacing it with the connection peer.
+  The UI labels public and peer IPs separately.
+- Dashboard server rows and server cards show the server IP and its
+  country/city instead of the OS.
+- Settings → System can change the panel listen port. A root path unit applies
+  the request safely, updates Caddy when applicable, and the page explains
+  `--behind-proxy`.
+- Regenerated rounded PNG icons and busted favicon caches.
+
 ## 1.8.1
 
 - Recovery, certificate-expiry and resource notifications now get a readable

@@ -107,6 +107,7 @@ type agentSession struct {
 	agentName   string
 	transport   string
 	ip          string
+	peerIP      string
 	connectedAt int64
 
 	ctx    context.Context
@@ -140,6 +141,7 @@ func (a *App) newAgentSession(parent context.Context, ag *model.Agent, transport
 		agentName:   ag.Name,
 		transport:   transport,
 		ip:          ip,
+		peerIP:      ip,
 		connectedAt: nowUnix(),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -311,6 +313,8 @@ func (a *App) broadcastAgentLink(s *agentSession, connected bool) {
 		"agent_id":     s.agentID,
 		"connected":    connected,
 		"transport":    s.transport,
+		"ip":           s.ip,
+		"peer_ip":      s.peerIP,
 		"last_seen":    nowUnix(),
 		"protocol":     agentproto.ProtocolVersion,
 		"connected_at": s.connectedAt,
@@ -367,8 +371,10 @@ func (a *App) enrichAgents(agents []model.Agent) []model.Agent {
 		agents[i].XrayAvailable = false
 		agents[i].XrayVersion = ""
 		agents[i].ConnectedAt = 0
+		agents[i].PeerIP = ""
 		if link := a.links.get(agents[i].ID); link != nil {
 			agents[i].Connected = true
+			agents[i].PeerIP = link.peerIP
 			agents[i].Transport = link.transport
 			agents[i].Protocol = agentproto.ProtocolVersion
 			agents[i].ConnectedAt = link.connectedAt

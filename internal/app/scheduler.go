@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -320,7 +321,9 @@ func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	report.IP = clientIP(r)
+	if strings.TrimSpace(report.IP) == "" {
+		report.IP = clientIP(r)
+	}
 	if err := a.applyAgentReport(ag.ID, report, "REST"); err != nil {
 		a.logger.Error("agent report", "agent", ag.ID, "error", err)
 		writeErr(w, 500, "ذخیره گزارش ناموفق بود")
@@ -331,6 +334,14 @@ func (a *App) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 
 // applyAgentReport is shared by the REST endpoint and the persistent link so
 // both transports produce identical database state, SSE updates and rules.
+func isPublicReportIP(value string) bool {
+	ip := net.ParseIP(strings.Trim(strings.TrimSpace(value), "[]"))
+	if ip == nil {
+		return false
+	}
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
+}
+
 func (a *App) applyAgentReport(agentID int64, report model.AgentReport, transport string) error {
 	ag, err := a.db.GetAgent(agentID)
 	if err != nil {
@@ -341,6 +352,12 @@ func (a *App) applyAgentReport(agentID int64, report model.AgentReport, transpor
 	}
 	if report.Hostname == "" {
 		report.Hostname = ag.Name
+	}
+	// Keep the last public address if the agent has not resolved its egress IP
+	// yet, or if it accidentally reports a loopback/private address.
+	report.IP = strings.TrimSpace(report.IP)
+	if report.IP == "" || !isPublicReportIP(report.IP) {
+		report.IP = ag.IP
 	}
 	if err := a.db.RecordAgentReport(agentID, report); err != nil {
 		a.logFor("agent").Error("store agent report", "agent", agentID, "error", err)

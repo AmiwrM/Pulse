@@ -39,6 +39,7 @@ func (a *App) settingsView() map[string]any {
 			"checks":      checks,
 			"agents":      agents,
 			"server_time": nowUnix(),
+			"listen_addr": a.cfg.Addr,
 		},
 	}
 }

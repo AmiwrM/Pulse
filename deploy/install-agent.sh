@@ -13,7 +13,7 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.8.1      Release tag (default: latest)
+#   --release v1.9.0      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
@@ -25,7 +25,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.8.1"
+INSTALLER_VERSION="1.9.0"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 
@@ -325,9 +325,9 @@ echo " Service : systemctl status pulse-agent --no-pager"
 echo " Logs    : journalctl -u pulse-agent -f"
 echo
 echo " Manage  :"
-echo "   pulse-agent status"
-echo "   pulse-agent restart"
-echo "   pulse-agent logs"
-echo "   pulse-agent update"
-echo "   (pulse-a is an alias for pulse-agent)"
+echo "   pulse-a status"
+echo "   pulse-a restart"
+echo "   pulse-a logs"
+echo "   pulse-a update"
+echo "   (pulse-agent is a compatibility alias for pulse-a)"
 echo "============================================================"

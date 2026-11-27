@@ -56,6 +56,8 @@ func TestValidateMonitor(t *testing.T) {
 		{"vps", "VPS 1", `{"panel_url":"https://panel.example.com:4085","api_key":"k","api_pass":"p","vps_id":1}`, true},
 		{"vps", "VPS 1", `{"panel_url":"panel.example.com","api_key":"k","api_pass":"p","vps_id":1}`, false},
 		{"vps", "VPS 1", `{"panel_url":"https://panel.example.com:4085","api_key":"k","api_pass":"p"}`, false},
+		{"vps", "VPS 1", `{"panel_url":"https://panel.example.com:4085","api_key":"k","api_pass":"p","vps_id":1,"threshold_mode":"remaining","warn_remaining_gb":10,"critical_remaining_gb":2}`, true},
+		{"vps", "VPS 1", `{"panel_url":"https://panel.example.com:4085","api_key":"k","api_pass":"p","vps_id":1,"threshold_mode":"bogus"}`, false},
 	}
 	for _, c := range cases {
 		err := Validate(c.typ, c.target, json.RawMessage(c.cfg))

@@ -8,7 +8,7 @@ import (
 func TestAppletDisplayName(t *testing.T) {
 	cases := map[string]string{
 		"/usr/local/bin/pulse":       "pulse",
-		"/usr/local/bin/pulse-agent": "pulse-agent",
+		"/usr/local/bin/pulse-agent": "pulse-a",
 		"pulse-a.exe":                "pulse-a",
 		".pulse-update-2154844603":   "pulse",
 		"/tmp/pulse-linux-amd64":     "pulse",

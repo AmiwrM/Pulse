@@ -10,6 +10,19 @@ import (
 	"pulse/internal/store"
 )
 
+func TestIsPublicReportIP(t *testing.T) {
+	cases := map[string]bool{
+		"8.8.8.8": true, "2001:4860:4860::8888": true,
+		"192.168.1.10": false, "10.0.0.1": false, "127.0.0.1": false,
+		"::1": false, "fe80::1": false, "": false,
+	}
+	for ip, want := range cases {
+		if got := isPublicReportIP(ip); got != want {
+			t.Errorf("isPublicReportIP(%q) = %v, want %v", ip, got, want)
+		}
+	}
+}
+
 func TestMigrateCFAccounts(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "pulse.db"))
 	if err != nil {

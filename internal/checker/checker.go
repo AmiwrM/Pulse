@@ -214,6 +214,17 @@ func Validate(monType, target string, raw json.RawMessage) error {
 		if u, err := url.Parse(strings.TrimSpace(c.PanelURL)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("آدرس پنل Virtualizor معتبر نیست")
 		}
+		switch strings.ToLower(strings.TrimSpace(c.ThresholdMode)) {
+		case "", "percent", "remaining":
+		default:
+			return fmt.Errorf("حالت آستانهٔ ترافیک Virtualizor نامعتبر است")
+		}
+		if c.WarnRemainingGB < 0 || c.CriticalRemainingGB < 0 {
+			return fmt.Errorf("آستانهٔ ترافیک باقی‌مانده نباید منفی باشد")
+		}
+		if c.WarnRemainingGB > 0 && c.CriticalRemainingGB > c.WarnRemainingGB {
+			return fmt.Errorf("آستانهٔ بحرانی نباید از آستانهٔ هشدار بیشتر باشد")
+		}
 	default:
 		return fmt.Errorf("نوع مانیتور ناشناخته است")
 	}

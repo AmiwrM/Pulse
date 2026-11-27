@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version         = "1.8.1"
+	Version         = "1.9.0"
 	ProtocolVersion = 2
 )
 

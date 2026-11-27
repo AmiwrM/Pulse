@@ -106,6 +106,7 @@ type Agent struct {
 	Arch            string          `json:"arch"`
 	Version         string          `json:"version"`
 	IP              string          `json:"ip"`
+	PeerIP          string          `json:"peer_ip,omitempty"`
 	LastSeen        int64           `json:"last_seen"`
 	CreatedAt       int64           `json:"created_at"`
 	CPUPct          float64         `json:"cpu_pct"`

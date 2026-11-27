@@ -340,10 +340,14 @@ func (r *agentRunner) publicIP(ctx context.Context) string {
 	r.ipMu.Unlock()
 
 	client := &http.Client{Timeout: 4 * time.Second}
+	// Prefer explicit IPv4 endpoints: a dual-stack resolver often returns an
+	// IPv6 egress address, which is not the primary server address shown by
+	// most VPS panels and confused operators in the UI.
 	for _, endpoint := range []string{
 		"https://api.ipify.org",
-		"https://ifconfig.me/ip",
-		"https://icanhazip.com",
+		"https://ipv4.icanhazip.com",
+		"https://ipv4.ifconfig.co",
+		"https://checkip.amazonaws.com",
 	} {
 		reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
@@ -351,6 +355,7 @@ func (r *agentRunner) publicIP(ctx context.Context) string {
 			cancel()
 			continue
 		}
+		req.Header.Set("User-Agent", "Pulse-Agent")
 		resp, err := client.Do(req)
 		if err != nil {
 			cancel()
@@ -359,13 +364,15 @@ func (r *agentRunner) publicIP(ctx context.Context) string {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 128))
 		resp.Body.Close()
 		cancel()
-		value := strings.TrimSpace(string(data))
-		if ip := net.ParseIP(value); ip != nil {
-			r.ipMu.Lock()
-			r.ipText = ip.String()
-			r.ipMu.Unlock()
-			return ip.String()
+		value := strings.Trim(strings.TrimSpace(string(data)), "[]")
+		ip := net.ParseIP(value)
+		if ip == nil || ip.To4() == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() {
+			continue
 		}
+		r.ipMu.Lock()
+		r.ipText = ip.String()
+		r.ipMu.Unlock()
+		return ip.String()
 	}
 	return ""
 }

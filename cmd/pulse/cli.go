@@ -42,7 +42,7 @@ func isAgentApplet(name string) bool {
 func appletDisplayName(argv0 string) string {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(argv0)), ".exe")
 	if name == "pulse-agent" || name == "pulse-a" {
-		return name
+		return "pulse-a"
 	}
 	return "pulse"
 }
@@ -57,7 +57,7 @@ func serviceTargetFor(agent bool) serviceTarget {
 func managementHelp(agent bool) string {
 	command := "pulse"
 	if agent {
-		command = "pulse-agent"
+		command = "pulse-a"
 	}
 	extra := "  " + command + " port [PORT]      show or change the panel listen port\n"
 	if agent {
@@ -141,7 +141,7 @@ func handleManagementCLI(args []string) bool {
 
 func agentFlag(fs *flag.FlagSet, agent *bool, defaultAgent bool) {
 	*agent = defaultAgent
-	fs.BoolVar(agent, "agent", defaultAgent, "target the pulse-agent service")
+	fs.BoolVar(agent, "agent", defaultAgent, "target the pulse-agent service (pulse-a)")
 }
 
 func parseCommandFlags(fs *flag.FlagSet, args []string) (bool, error) {
@@ -356,6 +356,9 @@ func handleUpdate(args []string, defaultAgent bool) bool {
 		os.Exit(1)
 	}
 	fmt.Printf("Pulse binary updated%s.\n", newVersion)
+	if !agent {
+		ensurePanelPortHelper()
+	}
 	if noRestart {
 		fmt.Println("Service restart skipped (--no-restart).")
 		return true
@@ -367,6 +370,40 @@ func handleUpdate(args []string, defaultAgent bool) bool {
 	}
 	fmt.Printf("%s restarted (%s).\n", target.label, target.unit)
 	return true
+}
+
+// ensurePanelPortHelper installs the small root path unit that lets the
+// unprivileged panel request a port change from Settings. Existing installs
+// get the feature on their next `pulse update` without a full reinstall.
+func ensurePanelPortHelper() {
+	if !fileExists("/etc/systemd/system/pulse.service") || fileExists("/etc/systemd/system/pulse-port.path") {
+		return
+	}
+	const service = `[Unit]
+Description=Apply a Pulse panel port change requested from the UI
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'f=/var/lib/pulse/port-request; test -f "$f" || exit 0; p=$(head -c 16 "$f" | tr -cd "0-9"); rm -f "$f"; test -n "$p" || exit 0; exec /usr/local/bin/pulse port "$p"'
+`
+	const pathUnit = `[Unit]
+Description=Watch for Pulse panel port change requests
+
+[Path]
+PathChanged=/var/lib/pulse/port-request
+Unit=pulse-port.service
+
+[Install]
+WantedBy=multi-user.target
+`
+	if err := os.WriteFile("/etc/systemd/system/pulse-port.service", []byte(service), 0644); err != nil {
+		return
+	}
+	if err := os.WriteFile("/etc/systemd/system/pulse-port.path", []byte(pathUnit), 0644); err != nil {
+		return
+	}
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	_ = exec.Command("systemctl", "enable", "--now", "pulse-port.path").Run()
 }
 
 func handleUninstall(args []string, defaultAgent bool) bool {
@@ -404,6 +441,9 @@ func handleUninstall(args []string, defaultAgent bool) bool {
 			_ = os.RemoveAll("/usr/local/lib/pulse")
 		}
 	} else {
+		_ = runSystemctl("disable", "pulse-port.path")
+		_ = os.Remove("/etc/systemd/system/pulse-port.path")
+		_ = os.Remove("/etc/systemd/system/pulse-port.service")
 		if purge {
 			_ = os.Remove("/etc/caddy/conf.d/pulse.caddy")
 			_ = os.Remove("/etc/pulse/pulse.env")

@@ -10,7 +10,17 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.8.1
+### خلاصهٔ نسخهٔ 1.9.0
+
+- آستانهٔ ترافیک Virtualizor حالا دو حالت دارد: **درصد مصرف‌شده** یا **گیگ باقی‌مانده**؛ هر دو حالت آستانهٔ هشدار و بحرانی جدا دارند.
+- تب‌های تنظیمات وسط‌چین و خوش‌ظاهر شدند و منوی کنار صفحه قابل جمع‌شدن است (با ذخیرهٔ وضعیت در مرورگر).
+- CLI ایجنت یکدست شد روی **`pulse-a`**؛ نام قدیمی `pulse-agent` به‌عنوان alias سازگاری باقی مانده است.
+- تشخیص IP عمومی ایجنت فقط IPv4 معتبر را ترجیح می‌دهد، گزارش REST دیگر IP ایجنت را با IP اتصال بازنویسی نمی‌کند و IP اتصال/عمومی جدا نمایش داده می‌شود.
+- در داشبورد و کارت سرورها، جای نام سیستم‌عامل، **IP و کشور/شهر سرور** نمایش داده می‌شود.
+- در تنظیمات → سیستم، **تغییر پورت پنل** و توضیح حالت **`--behind-proxy`** اضافه شد؛ تغییر پورت با یک path unit امن انجام می‌شود و Caddy هم به‌روزرسانی می‌شود.
+- آیکون‌های PNG (favicon/PWA) واقعاً گرد شدند و کش آن‌ها شکسته شد.
+
+**تغییرات 1.8.1:**
 
 - **چند حساب Cloudflare** اضافه شد: افزودن، ویرایش، فعال/غیرفعال و حذف حساب‌ها، هر کدام با توکن و دامنه‌های مستقل.
 - ساخت، ویرایش و حذف **رکوردهای DNS** از داخل پنل، با پشتیبانی از A، AAAA، CNAME، TXT، MX، NS، SRV و CAA.
@@ -69,12 +79,12 @@
 - **لاگ‌های تفکیک‌شده**: صفحهٔ لاگ با دسته‌های پنل، زمان‌بند، مانیتور، Xray، کلادفلر، اعلان‌ها، ایجنت، امنیت و API؛ ذخیره در SQLite، حفظ ۱۴ روز/۲۰٬۰۰۰ رکورد و فرمان `pulse logs` با فیلتر.
 - **CLI یکدست و کامل** برای پنل و ایجنت: start/stop/restart/status/logs/update/uninstall/version و `pulse port` برای تغییر پورت پنل.
 - **عدم تداخل با Xray موجود**: نصب‌کننده نسخهٔ اختصاصی Pulse را در `/usr/local/lib/pulse/xray` می‌گذارد و به `/usr/local/bin/xray` یا سرویس Xray دست نمی‌زند؛ هسته‌های تست فقط با پورت تصادفی loopback و پوشهٔ موقت اجرا می‌شوند.
-- **پورت پنل قابل تنظیم** با `--port` / `PULSE_PORT` و دستور `pulse port`؛ گزینهٔ `--behind-proxy` برای نودهایی که از قبل Xray/VPN و reverse proxy دارند.
+- **پورت پنل قابل تنظیم** با `--port` / `PULSE_PORT`، دستور `pulse port` و تنظیمات → سیستم. گزینهٔ `--behind-proxy` پنل را فقط روی `127.0.0.1` بالا می‌آورد و به Caddy/پورت 443/Xray موجود دست نمی‌زند؛ مناسب نودهایی که از قبل reverse proxy یا پنل Xray/VPN دارند.
 - **مودال‌های موبایل سبک‌تر**: انیمیشن کوتاه‌تر، بدون سایه/بلور سنگین و جلوگیری از بسته‌شدن اتفاقی با کلیک اطراف.
 - **اتصال زندهٔ ایجنت** با gRPC (و fallback خودکار به WebSocket و سپس REST)؛ گزارش منابع هر **۱ ثانیه** و نمایش فوری وضعیت اتصال/قطع.
 - **تست از ایجنت انتخابی**: هر مانیتور می‌تواند هندشیک کانفیگ، TCP، ICMP، HTTP، DNS یا SSL را از شبکهٔ یک سرور دیگر اجرا کند؛ اگر ایجنت آفلاین باشد، وضعیت «هشدار» ثبت می‌شود و رخداد کاذب باز نمی‌شود.
 - ایجنت قابلیت تست و وضعیت Xray خود را اعلام می‌کند؛ نصب‌کنندهٔ ایجنت Xray رسمی را هم نصب می‌کند تا هندشیک واقعی از همان سرور انجام شود.
-- نصب ایجنت با **یک دستور** از داخل پنل؛ توکن در `/etc/pulse/agent.env`؛ مدیریت با `pulse-agent` / `pulse-a`.
+- نصب ایجنت با **یک دستور** از داخل پنل؛ توکن در `/etc/pulse/agent.env`؛ مدیریت با `pulse-a` (نام قدیمی `pulse-agent` به‌عنوان alias باقی مانده است).
 - **تم روشن و تیره**، آیکون‌های یکدست، هاله‌های نرم‌تر، هدر تمام‌عرض و رابط ریسپانسیو.
 - اصلاحات پایدارسازی: ماندگاری انتخاب ایجنت در مانیتور، پاک‌سازی ارجاع‌ها هنگام حذف ایجنت، و جلوگیری از رخداد کاذب هنگام خطای زیرساخت تست.
 
@@ -190,8 +200,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.8.1
-git push origin v1.8.1
+git tag v1.9.0
+git push origin v1.9.0
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -204,7 +214,7 @@ git push origin v1.8.1
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.8.1 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.9.0 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -228,35 +238,36 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 
 ## دستورهای مدیریت VPS
 
-از نسخهٔ `1.6.0` پنل و ایجنت یک مجموعهٔ دستور یکدست دارند. `pulse-agent` و `pulse-a` همان باینری هستند و `pulse agent ...` هم ایجنت را هدف می‌گیرد:
+از نسخهٔ `1.6.0` پنل و ایجنت یک مجموعهٔ دستور یکدست دارند. نام رسمی CLI ایجنت **`pulse-a`** است و نام قدیمی `pulse-agent` هم به‌عنوان alias سازگاری کار می‌کند:
 
 ```bash
 # پنل
 pulse start | stop | restart | status
 pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
-pulse update [--release v1.8.1] [--no-restart]
+pulse update [--release v1.9.0] [--no-restart]
 pulse port                       # نمایش پورت فعلی
 pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
 pulse uninstall [--purge] [--yes]
 pulse version
 
 # ایجنت
-pulse-agent start | stop | restart | status
-pulse-agent logs [--lines N] [--follow] [--journal]
-pulse-agent update
-pulse-agent uninstall [--purge] [--yes]
-pulse-agent version
+pulse-a start | stop | restart | status
+pulse-a logs [--lines N] [--follow] [--journal]
+pulse-a update
+pulse-a uninstall [--purge] [--yes]
+pulse-a version
 ```
 
-- `pulse logs` پیش‌فرض از دیتابیس لاگ برنامه می‌خواند؛ `--journal` آن را به journalctl برمی‌گرداند. `pulse-agent logs` همیشه journalctl است چون ایجنت دیتابیس محلی ندارد.
+- `pulse logs` پیش‌فرض از دیتابیس لاگ برنامه می‌خواند؛ `--journal` آن را به journalctl برمی‌گرداند. `pulse-a logs` همیشه journalctl است چون ایجنت دیتابیس محلی ندارد.
 - `uninstall` سرویس و یونیت را حذف می‌کند ولی دیتابیس/تنظیمات را نگه می‌دارد؛ `--purge` آن‌ها را هم پاک می‌کند. باینری `/usr/local/bin/pulse` عمداً حذف نمی‌شود تا اگر ایجنت روی همان هاست است از کار نیفتد.
 - `pulse port 8090` یونیت systemd و بلوک Caddy پالس را به‌روزرسانی می‌کند، بکاپ می‌گیرد و سرویس‌ها را ری‌استارت/ری‌لود می‌کند. برای تغییر فقط با نصب‌کننده: `install.sh --port 8090`.
+- از **تنظیمات → سیستم** هم می‌توانید پورت پنل را تغییر دهید. در نسخه‌های 1.9.0+ یک path unit روت امن (`pulse-port.path`) درخواست را اعمال می‌کند و Caddy هم به‌روزرسانی می‌شود. اگر پشت پروکسی خارجی هستید، پورت مقصد آن پروکسی را دستی به‌روزرسانی کنید.
 
-`pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
+`pulse update` و `pulse-a update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.8.1
-pulse-agent update --release v1.8.1
+pulse update --release v1.9.0
+pulse-a update --release v1.9.0
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -276,12 +287,12 @@ sudo systemctl restart pulse
 ```bash
 curl -fL https://github.com/AmiwrM/Pulse/releases/latest/download/pulse-linux-amd64 -o /tmp/pulse
 sudo install -m 0755 /tmp/pulse /usr/local/bin/pulse
-sudo ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
 sudo ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-a
+sudo ln -sfn /usr/local/bin/pulse /usr/local/bin/pulse-agent
 sudo systemctl restart pulse-agent
 ```
 
-بعد از این آپدیت، از دفعهٔ بعد `pulse update` یا `pulse-agent update` کافی است. اگر هنوز Release نداری، نصب مجدد با installer از سورس انجام می‌شود:
+بعد از این آپدیت، از دفعهٔ بعد `pulse update` یا `pulse-a update` کافی است. اگر هنوز Release نداری، نصب مجدد با installer از سورس انجام می‌شود:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh -o /tmp/pulse-install.sh
@@ -587,18 +598,18 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/deploy/install-ag
 
 در اتصال زنده، فاصلهٔ گزارش **۱ ثانیه** است (حتی اگر در یونیت قدیمی `--interval 5s` مانده باشد)؛ مقدار `--interval` برای fallback REST و سازگاری نگه داشته شده است.
 
-`pulse-agent update` فقط باینری ایجنت را به‌روزرسانی می‌کند و Xray نصب نمی‌کند. برای اضافه‌شدن Xray به یک ایجنت موجود، همان دستور نصب یک‌خطی را با `--server` و `--token` فعلی دوباره اجرا کنید (توکن در `/etc/pulse/agent.env` است) یا Xray را جداگانه نصب کنید.
+`pulse-a update` فقط باینری ایجنت را به‌روزرسانی می‌کند و Xray نصب نمی‌کند. برای اضافه‌شدن Xray به یک ایجنت موجود، همان دستور نصب یک‌خطی را با `--server` و `--token` فعلی دوباره اجرا کنید (توکن در `/etc/pulse/agent.env` است) یا Xray را جداگانه نصب کنید.
 
 مدیریت ایجنت:
 
 ```bash
-pulse-agent status
-pulse-agent restart
-pulse-agent logs
-pulse-agent update
-
-# همین دستورها با نام کوتاه pulse-a هم کار می‌کنند
+pulse-a status
 pulse-a restart
+pulse-a logs
+pulse-a update
+
+# نام قدیمی pulse-agent هم به‌عنوان alias کار می‌کند
+pulse-agent restart
 ```
 
 اگر هنوز ریلیزی منتشر نشده است، با `--binary /path/to/pulse-linux-amd64` از باینری ساخته‌شدهٔ خودتان استفاده کنید.
@@ -718,7 +729,7 @@ pulse logs --follow
 pulse logs --journal          # journalctl خام
 ```
 
-- لاگ ایجنت جداگانه در journal همان سرور است: `pulse-agent logs --follow`.
+- لاگ ایجنت جداگانه در journal همان سرور است: `pulse-a logs --follow`.
 
 ---
 
@@ -848,7 +859,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.8.1` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.9.0` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -887,8 +898,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.8.1
-git push origin v1.8.1
+git tag v1.9.0
+git push origin v1.9.0
 ```
 
 ---

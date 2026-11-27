@@ -1,8 +1,8 @@
 /* =========================================================================
    Pulse — single page control panel
    ========================================================================= */
-import { lineChart, sparkline } from './charts.js?v=23';
-import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=23';
+import { lineChart, sparkline } from './charts.js?v=24';
+import { initI18n, getLang, setLang, translateDOM, translateText } from './i18n.js?v=24';
 
 initI18n();
 
@@ -499,6 +499,7 @@ function startApp() {
   $('#auth-root').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#side-version').textContent = fa(state.auth?.version || '');
+  applySidebarCollapse(document.documentElement.classList.contains('sidebar-collapsed'));
   $('#avatar-btn').textContent = userNameInitial();
   document.title = EN
     ? `${translateText(state.auth?.site_title || 'Pulse')} | Command center`
@@ -730,7 +731,11 @@ function updateMiniAgent(a) {
   if (!row) return false;
   const q = agentQuality(a);
   const meta = row.querySelector('[data-mini-meta]');
-  if (meta) meta.textContent = `${q.online ? 'آنلاین' : 'آفلاین'} · ${a.hostname || 'بدون هاست'}`;
+  if (meta) {
+    meta.title = 'IP عمومی خروجی؛ ممکن است با IP اصلی سرور متفاوت باشد.';
+    meta.innerHTML = `${q.online ? 'آنلاین' : 'آفلاین'} · ${esc(a.ip || 'بدون IP')}<span data-agent-location data-ip="${esc(a.ip || '')}"></span>`;
+    hydrateAgentLocations(meta);
+  }
   const cpu = row.querySelector('[data-mini-cpu]');
   if (cpu) cpu.style.width = `${clamp(a.cpu_pct || 0, 0, 100)}%`;
   const ram = row.querySelector('[data-mini-ram]');
@@ -767,6 +772,8 @@ function handleSSE(msg) {
     if (d.last_seen) a.last_seen = d.last_seen;
     if (d.version) a.version = d.version;
     if (d.hostname) a.hostname = d.hostname;
+    if (d.ip) a.ip = d.ip;
+    if (d.peer_ip) a.peer_ip = d.peer_ip;
     if (state.summary?.stats) state.summary.stats.agents_online = state.agents.filter(statusFromAgent).length;
     const cardPatched = updateAgentCard(a);
     updateMiniAgent(a);
@@ -1031,6 +1038,27 @@ function statusFromAgent(a) {
   if (!a.last_seen) return false;
   return Date.now() / 1000 - a.last_seen <= (state.agentsOfflineAfter || 120);
 }
+function geoFlag(code) {
+  const cc = String(code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '';
+  return String.fromCodePoint(...[...cc].map((ch) => 0x1F1E6 + ch.charCodeAt(0) - 65));
+}
+function geoPlace(info) {
+  if (!info || info.error) return '';
+  const place = [info.country, info.city].filter(Boolean).join(' · ');
+  return [geoFlag(info.country_code), place].filter(Boolean).join(' ');
+}
+async function hydrateAgentLocations(root = document) {
+  const nodes = Array.from(root.querySelectorAll('[data-agent-location]'));
+  await Promise.all(nodes.map(async (el) => {
+    const ip = el.dataset.ip || '';
+    if (!ip) { el.textContent = ''; return; }
+    const info = await geoLookup(ip);
+    if (!el.isConnected || el.dataset.ip !== ip) return;
+    const place = geoPlace(info);
+    el.textContent = place ? ` · ${place}` : '';
+  }));
+}
 async function geoLookup(ip) {
   const key = String(ip || '').trim();
   if (!key) return null;
@@ -1287,7 +1315,7 @@ function renderDashboard() {
             const on = statusFromAgent(a);
             return `<div class="mini-agent" data-action="open-agent" data-id="${a.id}" data-mini-agent="${a.id}" role="button" tabindex="0">
               <div class="mini-ico">${icon('server')}</div>
-              <div class="mini-info"><div class="mini-name">${esc(a.name)}</div><div class="mini-meta" data-mini-meta>${on ? 'آنلاین' : 'آفلاین'} · ${esc(a.hostname || 'بدون هاست')}</div></div>
+              <div class="mini-info"><div class="mini-name">${esc(a.name)}</div><div class="mini-meta" data-mini-meta title="IP عمومی خروجی؛ ممکن است با IP اصلی سرور متفاوت باشد.">${on ? 'آنلاین' : 'آفلاین'} · ${esc(a.ip || 'بدون IP')}<span data-agent-location data-ip="${esc(a.ip || '')}"></span></div></div>
               <div class="mini-bars">
                 <div class="mini-bar"><span class="cpu" data-mini-cpu style="width:${clamp(a.cpu_pct || 0, 0, 100)}%"></span></div>
                 <div class="mini-bar"><span class="ram" data-mini-ram style="width:${clamp(a.ram_pct || 0, 0, 100)}%"></span></div>
@@ -1325,6 +1353,7 @@ function renderDashboard() {
         </div>
       </div>
     </div>`;
+  hydrateAgentLocations($('#view'));
 }
 
 /* ------------------------------------------------------------------ monitors page */
@@ -1497,17 +1526,25 @@ async function openMonitorDetail(id, opts = {}) {
       const limit = Number(meta.limit_gb) || 0;
       const remaining = Number(meta.remaining_gb) || 0;
       const pct = clamp(Number(meta.percent) || 0, 0, 100);
+      const thresholdMode = meta.threshold_mode === 'remaining' ? 'remaining' : 'percent';
+      const warnGB = Number(meta.warn_remaining_gb) || 0;
+      const criticalGB = Number(meta.critical_remaining_gb) || 0;
+      const warnPct = Number(meta.warn_percent) || 80;
+      const criticalPct = Number(meta.critical_percent) || 95;
+      const critical = thresholdMode === 'remaining' ? remaining <= criticalGB : pct >= criticalPct;
+      const warning = thresholdMode === 'remaining' ? remaining <= warnGB : pct >= warnPct;
       const state = meta.traffic_state === 'critical' ? ['red', 'بحرانی'] : meta.traffic_state === 'warning' ? ['amber', 'هشدار'] : ['green', 'عادی'];
       const power = meta.suspended ? 'معلق (Suspend)' : String(meta.status) === '1' ? 'روشن' : 'خاموش';
+      const thresholdText = thresholdMode === 'remaining' ? `هشدار: زیر ${nf1.format(warnGB)} GB باقی‌مانده` : `هشدار: از ${nf1.format(warnPct)}٪ مصرف`;
       return `<div class="detail-chart">
-        <div class="detail-chart-head"><b>${icon('server')} ترافیک و وضعیت Virtualizor</b><span><span class="chip ${power === 'روشن' ? 'green' : 'red'}">${esc(power)}</span> <span class="chip ${state[0]}">${state[1]}</span></span></div>
+        <div class="detail-chart-head"><b>${icon('server')} ترافیک و وضعیت Virtualizor</b><span><span class="chip ${power === 'روشن' ? 'green' : 'red'}">${esc(power)}</span> <span class="chip ${state[0]}">${state[1]}</span> <span class="chip violet">${thresholdMode === 'remaining' ? 'آستانه: باقی‌مانده' : 'آستانه: درصد'}</span></span></div>
         <div class="detail-stats">
           <div class="mini-stat"><span>ترافیک مصرفی</span><b>${nf1.format(used)} GB${limit > 0 ? ` از ${num(limit)} GB` : ''}</b></div>
-          <div class="mini-stat"><span>ترافیک باقی‌مانده</span><b style="color:${pct >= 95 ? 'var(--danger-text)' : pct >= 80 ? 'var(--warning-text)' : 'var(--success-text)'}">${limit > 0 ? `${nf1.format(remaining)} GB` : 'نامحدود'}</b></div>
+          <div class="mini-stat"><span>ترافیک باقی‌مانده</span><b style="color:${critical ? 'var(--danger-text)' : warning ? 'var(--warning-text)' : 'var(--success-text)'}">${limit > 0 ? `${nf1.format(remaining)} GB` : 'نامحدود'}</b></div>
           <div class="mini-stat"><span>دریافت / ارسال</span><b style="font-size:11px">${bytes(meta.net_in || 0)} / ${bytes(meta.net_out || 0)}</b></div>
           <div class="mini-stat"><span>VPS ID</span><b>${esc(String(meta.vps_id || '—'))}</b></div>
         </div>
-        <div class="node-health"><div class="node-health-bar"><span style="width:${pct}%;background:${pct >= 95 ? '#fb7185' : pct >= 80 ? '#fbbf24' : '#34d399'}"></span></div><span>${limit > 0 ? `${nf1.format(pct)}٪ از سهمیهٔ ماهانه مصرف شده` : 'سهمیهٔ ترافیک نامحدود است'}</span></div>
+        <div class="node-health"><div class="node-health-bar"><span style="width:${pct}%;background:${critical ? '#fb7185' : warning ? '#fbbf24' : '#34d399'}"></span></div><span>${limit > 0 ? `${nf1.format(pct)}٪ مصرف · ${thresholdText}` : 'سهمیهٔ ترافیک نامحدود است'}</span></div>
       </div>`;
     })() : ''}
     <div class="detail-chart">
@@ -1711,7 +1748,7 @@ function agentCard(a) {
   return `<article class="panel agent-card" data-action="open-agent" data-id="${a.id}" role="button" tabindex="0">
     <div class="agent-head">
       <div class="agent-ico agent-ico-pulse">${icon('agent')}</div>
-      <div class="agent-title"><div class="agent-name">${esc(a.name)}</div><div class="agent-host" data-agent-host>${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}</div></div>
+      <div class="agent-title"><div class="agent-name">${esc(a.name)}</div><div class="agent-host" data-agent-host title="IP عمومی خروجی؛ ممکن است با IP اصلی سرور متفاوت باشد."><span data-agent-ip-host>${esc(a.ip || 'بدون IP')}</span><span data-agent-location data-ip="${esc(a.ip || '')}"></span></div></div>
       <span class="agent-online ${q.online ? '' : 'off'}" data-agent-online><span class="dot"></span>${q.online ? 'آنلاین' : 'آفلاین'}</span>
     </div>
     <div class="agent-connection">
@@ -1757,8 +1794,17 @@ function updateAgentCard(a) {
     transportEl.className = `chip ${transportChipClass(a)}`;
     transportEl.style.display = transport ? '' : 'none';
   }
-  const hostEl = card.querySelector('[data-agent-host]');
-  if (hostEl) hostEl.textContent = `${a.hostname || '—'}${a.os ? ' · ' + a.os : ''}`;
+  const hostEl = card.querySelector('[data-agent-ip-host]');
+  if (hostEl) hostEl.textContent = a.ip || 'بدون IP';
+  const locationEl = card.querySelector('[data-agent-location]');
+  if (locationEl) {
+    const nextIP = a.ip || '';
+    if (locationEl.dataset.ip !== nextIP) {
+      locationEl.dataset.ip = nextIP;
+      locationEl.textContent = '';
+    }
+    hydrateAgentLocations(locationEl.parentElement || card);
+  }
   [['cpu', a.cpu_pct], ['ram', a.ram_pct], ['disk', a.disk_pct]].forEach(([key, raw]) => {
     updateGauge(card, key, raw);
   });
@@ -1857,8 +1903,9 @@ function renderServers() {
     </div>`}
     <div class="banner" style="margin-top:16px">
       <div class="banner-ico">${icon('signal')}</div>
-      <div class="banner-body"><b>اتصال زندهٔ ایجنت</b><p>ایجنت ابتدا gRPC و در صورت نبود HTTP/2 از WebSocket استفاده می‌کند؛ در نهایت هم REST به‌عنوان fallback فعال می‌ماند. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:var(--link-text)">pulse-agent update</code>.</p></div>
+      <div class="banner-body"><b>اتصال زندهٔ ایجنت</b><p>ایجنت ابتدا gRPC و در صورت نبود HTTP/2 از WebSocket استفاده می‌کند؛ در نهایت هم REST به‌عنوان fallback فعال می‌ماند. نصب با یک دستور و به‌روزرسانی با <code style="font-family:var(--mono);font-size:9px;color:var(--link-text)">pulse-a update</code>.</p></div>
     </div>`;
+  hydrateAgentLocations($('#view'));
 }
 
 /* ------------------------------------------------------------------ rules page */
@@ -2244,6 +2291,8 @@ function renderSettings() {
   const s = data.settings || {};
   const sys = data.system || {};
   const xr = data.xray || {};
+  const listenAddr = String(sys.listen_addr || '');
+  const currentPort = listenAddr.split(':').pop() || '';
   const initials = userNameInitial();
   const zones = ['Asia/Tehran', 'Asia/Dubai', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'UTC'];
   const tab = state.settingsTab || 'general';
@@ -2317,11 +2366,24 @@ function renderSettings() {
       </div>
     </div>
     <div class="settings-pane ${tab === 'system' ? '' : 'hidden'}" data-settings-pane="system">
+      <div class="panel settings-card" style="margin-bottom:16px">
+        <h2>${icon('terminal')} پورت پنل و حالت پشت پروکسی <span class="chip violet" style="margin-inline-start:auto">Advanced</span></h2>
+        <div class="settings-desc">در حالت عادی، Caddy خودکار پنل را روی 443 منتشر می‌کند. اگر خودتان Nginx/Caddy/Cloudflare دارید، نصب با <code>--behind-proxy</code> پنل را فقط روی <code>127.0.0.1</code> بالا می‌آورد و به پورت 443 و Xray دست نمی‌زند. تغییر پورت زیر همان تنظیمات Caddy را هم به‌روزرسانی می‌کند.</div>
+        <form data-form="system-port">
+          <div class="form-grid">
+            <div class="field"><label>پورت فعلی</label><input class="input ltr" value="${esc(currentPort || '—')}" disabled></div>
+            <div class="field"><label>پورت جدید</label><input class="input ltr" id="panel-port-input" type="number" min="1" max="65535" name="port" value="${esc(currentPort || '8080')}" required></div>
+          </div>
+          <div class="warning-note">${icon('alert')} <div>با تغییر پورت، پنل چند لحظه قطع می‌شود. اگر پشت پروکسی خارجی هستید، پورت مقصد همان پروکسی را هم به‌روزرسانی کنید. در Docker پورت را از <code>docker-compose.yml</code> تغییر دهید. در نصب‌های قدیمی بدون واحد <code>pulse-port.path</code>، یک‌بار <code>install.sh</code> را اجرا کنید یا از دستور زیر استفاده کنید.</div></div>
+          <div class="help" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><code class="ltr" id="panel-port-command" style="direction:ltr">sudo pulse port ${esc(currentPort || '8080')}</code><button class="btn btn-sm btn-ghost" type="button" data-action="copy" data-copy-target="panel-port-command">${icon('copy')} کپی دستور</button><button class="btn btn-sm btn-primary" type="submit">${icon('check')} اعمال پورت</button></div>
+          <div class="form-error"></div>
+        </form>
+      </div>
       <div class="settings-grid">
         <div class="panel settings-card">
           <h2>${icon('activity')} وضعیت سامانه</h2>
           <div class="sys-grid">
-            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.8.1')}</b></div>
+            <div class="sys-item"><span>نسخه پالس</span><b>${esc(sys.version || '1.9.0')}</b></div>
             <div class="sys-item"><span>زمان فعال بودن</span><b>${duration(sys.uptime_sec || 0)}</b></div>
             <div class="sys-item"><span>حجم پایگاه داده</span><b>${bytes(sys.db_bytes || 0)}</b></div>
             <div class="sys-item"><span>مانیتورها</span><b>${num(sys.monitors || 0)}</b></div>
@@ -2387,19 +2449,29 @@ function monitorTypeFields(type, cfg = {}) {
       <div class="field full"><div class="service-chips"><span class="chip violet">VMess</span><span class="chip violet">VLESS</span><span class="chip violet">Trojan</span><span class="chip violet">Shadowsocks</span><span class="chip violet">WireGuard</span><span class="chip amber">Hysteria2/TUIC: فقط دسترسی</span></div></div>`;
   }
   if (type === 'vps') {
+    const mode = val('threshold_mode', 'percent') === 'remaining' ? 'remaining' : 'percent';
     return `<div class="field full"><div class="warning-note" style="margin:0">${icon('server')} <div>این مانیتور با API ادمین <b>Virtualizor</b> وضعیت VPS، ترافیک ماهانه و suspend را می‌خواند. API Key و Password را از <b>Admin Panel → API Credentials → List API Pairs</b> بردار.</div></div></div>
       <div class="field full"><label>آدرس پنل Virtualizor</label><input class="input ltr" name="panel_url" value="${esc(val('panel_url'))}" placeholder="https://panel.example.com:4085" required></div>
       <div class="field"><label>API Key</label><input class="input ltr" name="api_key" value="${esc(val('api_key'))}" autocomplete="off" required></div>
       <div class="field"><label>API Password</label><input class="input ltr" type="password" name="api_pass" value="${esc(val('api_pass'))}" autocomplete="off" required></div>
       <div class="field"><label>VPS ID</label><input class="input" type="number" min="1" name="vps_id" value="${Number(val('vps_id', 0)) || ''}" required></div>
-      <div class="field"><label>هشدار ترافیک (%)</label><input class="input" type="number" min="1" max="99" name="warn_percent" value="${Number(val('warn_percent', 80)) || 80}"></div>
-      <div class="field"><label>بحرانی (%)</label><input class="input" type="number" min="2" max="100" name="critical_percent" value="${Number(val('critical_percent', 95)) || 95}"></div>
+      <div class="field"><label>حالت آستانهٔ ترافیک</label><select class="select" name="threshold_mode" id="m-vps-threshold-mode"><option value="percent" ${mode === 'percent' ? 'selected' : ''}>درصد مصرف‌شده</option><option value="remaining" ${mode === 'remaining' ? 'selected' : ''}>گیگ باقی‌مانده</option></select></div>
+      <div class="field vps-threshold-percent ${mode === 'percent' ? '' : 'hidden'}"><label>هشدار ترافیک (%)</label><input class="input" type="number" min="1" max="99" name="warn_percent" value="${Number(val('warn_percent', 80)) || 80}"><div class="help">وقتی درصد مصرف از این مقدار بگذرد.</div></div>
+      <div class="field vps-threshold-percent ${mode === 'percent' ? '' : 'hidden'}"><label>بحرانی (%)</label><input class="input" type="number" min="2" max="100" name="critical_percent" value="${Number(val('critical_percent', 95)) || 95}"></div>
+      <div class="field vps-threshold-remaining ${mode === 'remaining' ? '' : 'hidden'}"><label>هشدار: باقی‌مانده (GB)</label><input class="input" type="number" min="0.1" step="0.1" name="warn_remaining_gb" value="${Number(val('warn_remaining_gb', 10)) || 10}"><div class="help">وقتی ترافیک باقی‌مانده کمتر از این مقدار شود.</div></div>
+      <div class="field vps-threshold-remaining ${mode === 'remaining' ? '' : 'hidden'}"><label>بحرانی: باقی‌مانده (GB)</label><input class="input" type="number" min="0.1" step="0.1" name="critical_remaining_gb" value="${Number(val('critical_remaining_gb', 2)) || 2}"></div>
       <div class="field full"><label class="check-row"><input type="checkbox" name="skip_tls_verify" ${checked('skip_tls_verify') ? 'checked' : ''}> نادیده گرفتن گواهی TLS پنل (self-signed)</label></div>`;
   }
   if (type === 'tcp') {
     return `<div class="field full"><div class="warning-note" style="margin:0">${icon('info')} <div>آدرس را به شکل <b class="ltr">host:port</b> وارد کنید. اتصال TCP برقرار می‌شود و تأخیر آن اندازه‌گیری می‌شود.</div></div></div>`;
   }
   return `<div class="field full"><div class="warning-note" style="margin:0">${icon('info')} <div>برای بررسی ICMP، سرور پالس باید دسترسی لازم را داشته باشد. در Docker گزینه <b class="ltr">cap_add: NET_RAW</b> لازم است. اگر ping نصب نباشد، بررسی خطا می‌دهد.</div></div></div>`;
+}
+function updateVPSThresholdFields(form) {
+  if (!form) return;
+  const mode = form.querySelector('#m-vps-threshold-mode')?.value || 'percent';
+  $$('.vps-threshold-percent', form).forEach((el) => el.classList.toggle('hidden', mode !== 'percent'));
+  $$('.vps-threshold-remaining', form).forEach((el) => el.classList.toggle('hidden', mode !== 'remaining'));
 }
 function targetMeta(type) {
   switch (type) {
@@ -2578,6 +2650,7 @@ async function openMonitorForm(monitor = null) {
   form.querySelector('#m-cf-enabled')?.addEventListener('change', (e) => {
     $('#m-cf-extra')?.classList.toggle('hidden', !e.target.checked);
   });
+  updateVPSThresholdFields(form);
   if (hasCF || !m) hydrateCFSelects(form, m);
   if (type === 'proxy') refreshXrayHint();
   // The modal must not wait for the agent list. Refresh it in the background
@@ -2666,8 +2739,11 @@ function collectMonitorConfig(form, type) {
     cfg.api_key = formVal(form, 'api_key');
     cfg.api_pass = formVal(form, 'api_pass');
     cfg.vps_id = Number(formVal(form, 'vps_id')) || 0;
+    cfg.threshold_mode = formVal(form, 'threshold_mode') || 'percent';
     cfg.warn_percent = Number(formVal(form, 'warn_percent')) || 80;
     cfg.critical_percent = Number(formVal(form, 'critical_percent')) || 95;
+    cfg.warn_remaining_gb = Number(formVal(form, 'warn_remaining_gb')) || 10;
+    cfg.critical_remaining_gb = Number(formVal(form, 'critical_remaining_gb')) || 2;
     cfg.skip_tls_verify = formChecked(form, 'skip_tls_verify');
     if (!cfg.panel_url || !cfg.api_key || !cfg.api_pass || !cfg.vps_id) {
       throw new Error('آدرس پنل، API Key، API Password و VPS ID الزامی است');
@@ -2737,7 +2813,7 @@ function openAgentGuide() {
     body: `<div class="steps">
       <div class="step"><span class="step-num">1</span><p><b>یک ایجنت بساز</b> تا توکن اختصاصی و دستور نصب یک‌خطی برایت ساخته شود.</p></div>
       <div class="step"><span class="step-num">2</span><p>همان دستور را روی VPS مقصد با <code>sudo</code> اجرا کن. اینستالر باینری را از Release رسمی می‌گیرد، سرویس systemd را می‌سازد و توکن را در <code>/etc/pulse/agent.env</code> امن نگه می‌دارد.</p></div>
-      <div class="step"><span class="step-num">3</span><p>وضعیت اتصال زنده را با <code>pulse-agent status</code> ببین. آمار هر 1 ثانیه می‌رسد و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
+      <div class="step"><span class="step-num">3</span><p>وضعیت اتصال زنده را با <code>pulse-a status</code> ببین. آمار هر 1 ثانیه می‌رسد و در قطعی موقت، ایجنت با backoff خودکار دوباره وصل می‌شود.</p></div>
     </div>
     <div class="agent-rest-note">${icon('signal')} اتصال gRPC با fallback به WebSocket و REST؛ keep-alive، تلاش مجدد خودکار و پایش آخرین گزارش.</div>
     <div class="warning-note">${icon('shield')} <div>ایجنت با دسترسی root برای خواندن آمار WireGuard و وضعیت systemd اجرا می‌شود. توکن را در جای امن نگه دار.</div></div>`,
@@ -2763,7 +2839,7 @@ function openAgentToken(data, title = 'ایجنت آماده نصب است') {
       <div class="install-card">
         <div class="install-card-head"><span class="install-badge">${icon('terminal')} نصب یک‌خطی</span><span class="chip green">gRPC</span></div>
         <div class="code-block" id="agent-install">${esc(install)}<button class="copy-btn" type="button" data-action="copy" data-copy-target="agent-install">کپی</button></div>
-        <div class="install-help">روی VPS مقصد، با کاربر root اجرا کن. اسکریپت باینری را از GitHub Releases دانلود می‌کند، Xray رسمی را برای تست کانفیگ نصب می‌کند و سرویس <code>pulse-agent</code> را با اتصال زنده بالا می‌آورد.</div>
+        <div class="install-help">روی VPS مقصد، با کاربر root اجرا کن. اسکریپت باینری را از GitHub Releases دانلود می‌کند، Xray رسمی را برای تست کانفیگ نصب می‌کند و سرویس <code>pulse-a</code> را با اتصال زنده بالا می‌آورد.</div>
       </div>
       <div class="token-box" style="margin-top:14px"><b>AGENT TOKEN</b><code id="agent-token">${esc(data.token || '')}</code><button class="btn btn-sm btn-ghost" style="margin-top:6px" type="button" data-action="copy" data-copy-target="agent-token">${icon('copy')} کپی توکن</button></div>
       <div class="agent-rest-note">${icon('signal')} پروتکل ایجنت: gRPC + WebSocket + fallback REST · گزارش زندهٔ 1 ثانیه‌ای</div>
@@ -2800,14 +2876,14 @@ async function openAgentDetail(id, opts = {}) {
   const peers = wg.reduce((s, w) => s + (w.peers?.length || 0), 0);
   const body = `<div class="detail-hero">
     <div class="agent-ico agent-ico-pulse" style="width:46px;height:46px">${icon('agent')}</div>
-    <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}" data-agent-detail-online><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}${a.ip ? ' · ' + esc(a.ip) : ''}</div>${a.ip ? `<div class="agent-geo" data-agent-geo>Looking up IP owner…</div>` : ''}</div>
+    <div class="detail-title"><h2>${esc(a.name)} <span class="agent-online ${online ? '' : 'off'}" data-agent-detail-online><span class="dot"></span>${online ? 'آنلاین' : 'آفلاین'}</span></h2><div class="target" style="line-height:1.9"><span class="ltr">${esc(a.ip || 'بدون IP عمومی')}</span>${a.peer_ip && a.peer_ip !== a.ip ? ` <span class="chip" style="height:20px;padding:0 7px" title="آدرسی که اتصال ایجنت از آن دیده می‌شود">IP اتصال: <b class="ltr">${esc(a.peer_ip)}</b></span>` : ''}<div style="font-size:9.5px;color:var(--faint);margin-top:2px">${esc(a.hostname || '—')}${a.os ? ' · ' + esc(a.os) : ''}</div></div>${a.ip ? `<div class="agent-geo" data-agent-geo>در حال دریافت موقعیت و مالک IP…</div><div class="help" style="margin-top:2px">IP عمومی از سرویس‌های خارجی خوانده می‌شود؛ اگر سرور پشت NAT یا پروکسی باشد ممکن است با IP اصلی سرور متفاوت باشد.</div>` : ''}</div>
     <div class="detail-actions"><button class="btn btn-sm" type="button" data-action="restart-agent" data-id="${a.id}">${icon('refresh')} ری‌استارت</button><button class="btn btn-sm" type="button" data-action="update-agent" data-id="${a.id}">${icon('download')} آپدیت ایجنت</button><button class="btn btn-sm" type="button" data-action="edit-agent" data-id="${a.id}">${icon('edit')} ویرایش</button><button class="btn btn-sm btn-soft" type="button" data-action="rotate-agent" data-id="${a.id}">${icon('key')} توکن جدید</button></div>
   </div>
   <div class="agent-connection detail-connection">
     <span class="agent-quality ${online ? 'great' : 'off'}" data-agent-detail-quality>${icon('signal')} ${online ? `${agentTransport(a) || 'زنده'} متصل` : 'قطع ارتباط'}</span>
     <span class="chip ${transportChipClass(a)}" data-agent-detail-transport>${agentTransport(a) || 'REST'}</span>
     <span data-agent-detail-seen-inline>آخرین گزارش: ${timeAgo(a.last_seen)}</span>
-    <span class="agent-update-hint">${icon('terminal')} <code>pulse-agent update</code></span>
+    <span class="agent-update-hint">${icon('terminal')} <code>pulse-a update</code></span>
     <span class="agent-update-hint">${icon('terminal')} <code>pulse-a logs</code></span>
   </div>
   ${a.can_check && online && !a.xray_available ? `<div class="warning-note" style="margin-top:10px">${icon('alert')} <div>برای تست واقعی کانفیگ از این ایجنت، Xray روی آن شناسایی نشده است. نصب‌کنندهٔ جدید ایجنت Xray رسمی را نصب می‌کند؛ برای ایجنت فعلی، Xray را نصب یا ایجنت را با نصب‌کنندهٔ جدید دوباره نصب کنید و سرویس ایجنت را ری‌استارت کنید.</div></div>` : ''}
@@ -2956,6 +3032,26 @@ function openCFRecordForm(record = null) {
 }
 
 /* ------------------------------------------------------------------ UI helpers */
+function applySidebarCollapse(collapsed) {
+  const root = document.documentElement;
+  root.classList.toggle('sidebar-collapsed', !!collapsed);
+  try { localStorage.setItem('pulse-sidebar-collapsed', collapsed ? '1' : '0'); } catch { /* private mode */ }
+  const btn = $('#sidebar-toggle');
+  if (btn) {
+    btn.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+    btn.setAttribute('aria-label', collapsed ? 'باز کردن منو' : 'جمع کردن منو');
+    btn.title = collapsed ? 'باز کردن منو' : 'جمع کردن منو';
+  }
+  $$('.nav-item').forEach((item) => {
+    if (!collapsed) { item.removeAttribute('title'); return; }
+    const label = Array.from(item.children).find((child) => child.tagName === 'SPAN'
+      && !child.classList.contains('ni') && !child.classList.contains('nav-glow') && !child.classList.contains('nav-badge'));
+    if (label?.textContent.trim()) item.title = label.textContent.trim();
+  });
+}
+function toggleSidebarCollapse() {
+  applySidebarCollapse(!document.documentElement.classList.contains('sidebar-collapsed'));
+}
 function openSidebar() {
   $('#sidebar')?.classList.add('open');
   $('#sidebar-backdrop')?.classList.add('show');
@@ -3030,6 +3126,7 @@ async function onDocumentClick(e) {
     switch (action) {
       case 'open-sidebar': openSidebar(); break;
       case 'close-sidebar': closeSidebar(); break;
+      case 'toggle-sidebar': toggleSidebarCollapse(); break;
       case 'close-modal': closeModal(); break;
       case 'close-detail': closeModal(); break;
       case 'user-menu': toggleUserMenu(); break;
@@ -3052,6 +3149,7 @@ async function onDocumentClick(e) {
           el.setAttribute('aria-pressed', selected ? 'true' : 'false');
         });
         form.querySelector('#type-fields').innerHTML = monitorTypeFields(type, cfg);
+        updateVPSThresholdFields(form);
         const meta = targetMeta(type);
         form.querySelector('#m-target-label').innerHTML = `${meta.label}${meta.optional ? '' : ' <span class="req">*</span>'}`;
         const inp = form.querySelector('#m-target');
@@ -3386,6 +3484,10 @@ async function onDocumentChange(e) {
     }
     return;
   }
+  if (el.id === 'm-vps-threshold-mode') {
+    updateVPSThresholdFields($('#monitor-form'));
+    return;
+  }
   if (el.id === 'm-cf-enabled') {
     const extra = $('#m-cf-extra');
     extra?.classList.toggle('hidden', !el.checked);
@@ -3459,6 +3561,11 @@ async function onDocumentChange(e) {
   }
 }
 function onDocumentInput(e) {
+  if (e.target.id === 'panel-port-input') {
+    const cmd = $('#panel-port-command');
+    if (cmd) cmd.textContent = `sudo pulse port ${e.target.value || '8080'}`;
+    return;
+  }
   if (e.target.id === 'monitor-search') {
     state.filters.search = e.target.value;
     refreshMonitorGrid();
@@ -3686,6 +3793,22 @@ async function onDocumentSubmit(e) {
       toast('تنظیمات سامانه ذخیره شد', 'success');
       await reloadSettingsPreserve('settings-general');
       updateShell('settings');
+      return;
+    }
+    if (mode === 'system-port') {
+      const port = Number(formVal(form, 'port'));
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('پورت باید بین 1 و 65535 باشد');
+      const ok = await confirmAction({
+        title: 'تغییر پورت پنل',
+        message: `پنل روی پورت ${port} راه‌اندازی مجدد شود؟ اگر از پروکسی خارجی استفاده می‌کنید، پورت مقصد آن را هم تغییر دهید.`,
+        confirmText: 'تغییر پورت',
+        danger: true,
+      });
+      if (!ok) return;
+      const res = await api('/api/system/port', { method: 'POST', body: { port } });
+      toast(res.message || 'درخواست تغییر پورت ثبت شد', 'success');
+      const cmd = $('#panel-port-command');
+      if (cmd) cmd.textContent = `sudo pulse port ${port}`;
       return;
     }
     if (mode === 'xray-settings') {

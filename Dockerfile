@@ -2,7 +2,7 @@
 FROM golang:1.26-alpine AS build
 
 ARG GOPROXY=https://proxy.golang.org,direct
-ARG VERSION=1.8.1
+ARG VERSION=1.9.0
 ENV CGO_ENABLED=0 GOPROXY=${GOPROXY} GOSUMDB=off
 
 WORKDIR /src
