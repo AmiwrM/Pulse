@@ -15,11 +15,11 @@
 #   Xray core ....... https://github.com/XTLS/Xray-core/releases
 #   Caddy ........... official Caddy apt repository
 #
-# Supported: Debian 12, Ubuntu 22.04 / 24.04. Run as root.
+# Supported: Debian 11 / 12, Ubuntu 20.04 / 22.04 / 24.04. Run as root.
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.6.0"
+INSTALLER_VERSION="1.6.1"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 BRANCH="${PULSE_BRANCH:-main}"
 REPO_URL="https://github.com/${REPO_SLUG}"
@@ -53,6 +53,23 @@ PULSE_SRC_KIND=""
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# apt/dpkg can be busy with unattended-upgrades, cloud-init or another install.
+# Wait for the lock instead of failing with "Could not get lock".
+apt_get() {
+  local attempt
+  for attempt in 1 2 3; do
+    if DEBIAN_FRONTEND=noninteractive apt-get \
+      -o DPkg::Lock::Timeout=180 \
+      -o Acquire::Retries=3 \
+      "$@"; then
+      return 0
+    fi
+    warn "apt-get $* failed (attempt ${attempt}/3); another package manager may be running. Retrying in 5s..."
+    sleep 5
+  done
+  return 1
+}
 
 usage() {
   cat <<HELP
@@ -193,9 +210,11 @@ case "$ARCH" in
   *) die "Unsupported architecture: $ARCH (amd64/arm64 only)" ;;
 esac
 
-log "Installing system dependencies..."
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl unzip tar gzip coreutils iputils-ping openssl >/dev/null
+log "Installing system dependencies (waiting for any apt/dpkg lock)..."
+apt_get update -qq \
+  || die "apt-get update failed after retries. Run 'sudo apt-get update', fix the error it prints, then re-run this installer."
+apt_get install -y -qq ca-certificates curl unzip tar gzip coreutils iputils-ping openssl >/dev/null \
+  || die "Could not install system packages. Run 'sudo apt-get -f install', then re-run this installer."
 
 get_public_ip() {
   local ip=""
@@ -251,22 +270,91 @@ if [[ "$USE_SSL" == "yes" ]]; then
 fi
 
 # ------------------------------------------------------------------ Caddy
+caddy_version_ok() {
+  local raw ver major minor
+  raw="$(caddy version 2>/dev/null | awk '{print $1}')"
+  [[ "$raw" == v2.* ]] || return 1
+  ver="${raw#v}"
+  IFS=. read -r major minor _ <<<"$ver"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+  (( major > 2 || (major == 2 && minor >= 6) ))
+}
+
 install_caddy() {
+  local need_upgrade=0
   if command -v caddy >/dev/null 2>&1 && systemctl cat caddy.service >/dev/null 2>&1; then
+    if caddy_version_ok; then
+      return 0
+    fi
+    warn "Installed Caddy $(caddy version 2>/dev/null | awk '{print $1}') is older than 2.6; trying the official repository..."
+    need_upgrade=1
+  else
+    log "Installing Caddy from the distribution repository..."
+    if apt_get install -y -qq caddy >/dev/null 2>&1; then
+      if caddy_version_ok; then
+        return 0
+      fi
+      warn "The distribution Caddy is older than 2.6; trying the official repository..."
+      need_upgrade=1
+    else
+      need_upgrade=1
+    fi
+  fi
+
+  if [[ "$need_upgrade" -eq 1 ]]; then
+    warn "Adding the official Caddy repository for Caddy 2.6+..."
+    if apt_get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gpg >/dev/null 2>&1 \
+      && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+        | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+      && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+        > /etc/apt/sources.list.d/caddy-stable.list \
+      && apt_get update -qq \
+      && apt_get install -y -qq caddy >/dev/null 2>&1; then
+      if caddy_version_ok; then
+        return 0
+      fi
+      warn "Caddy was installed from the official repository but is still older than 2.6."
+    else
+      warn "Could not install Caddy 2.6+ from the official repository."
+    fi
+  fi
+
+  # An older Caddy 2.x can still serve Pulse over HTTPS; the installer then
+  # writes a WebSocket-compatible config and skips the h2c/gRPC transport.
+  if command -v caddy >/dev/null 2>&1 \
+    && caddy version 2>/dev/null | awk '{print $1}' | grep -q '^v2\.' \
+    && systemctl cat caddy.service >/dev/null 2>&1; then
+    warn "Continuing with Caddy $(caddy version 2>/dev/null | awk '{print $1}'); the agent link will use WebSocket/REST."
     return 0
   fi
-  log "Installing Caddy from the distribution repository..."
-  if apt-get install -y -qq caddy >/dev/null 2>&1; then
-    return 0
-  fi
-  warn "Caddy is not in the configured apt repositories; adding the official repository..."
-  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gpg >/dev/null || return 1
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-    | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg || return 1
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-    > /etc/apt/sources.list.d/caddy-stable.list || return 1
-  apt-get update -qq || return 1
-  apt-get install -y -qq caddy >/dev/null
+  return 1
+}
+
+# Write the Pulse Caddy site. With h2c enabled, Caddy proxies the agent gRPC
+# path to Pulse over cleartext HTTP/2; without it, the agent falls back to
+# WebSocket and REST, which works on every Caddy 2.x release.
+write_pulse_caddy() {
+  local grpc_h2c="$1"
+  {
+    printf '%s {\n' "$DOMAIN"
+    printf '\tencode gzip\n'
+    if [[ "$grpc_h2c" -eq 1 ]]; then
+      printf '\t@pulse_grpc {\n'
+      printf '\t\tpath /pulse.agent.v1.AgentLink/*\n'
+      printf '\t\theader Content-Type application/grpc*\n'
+      printf '\t}\n'
+      printf '\thandle @pulse_grpc {\n'
+      printf '\t\treverse_proxy 127.0.0.1:%s {\n' "$PORT"
+      printf '\t\t\ttransport http {\n\t\t\t\tversions h2c 2\n\t\t\t}\n'
+      printf '\t\t}\n\t}\n'
+    fi
+    printf '\thandle {\n'
+    printf '\t\treverse_proxy 127.0.0.1:%s {\n\t\t\tflush_interval -1\n\t\t}\n' "$PORT"
+    printf '\t}\n'
+    printf '\theader {\n\t\t-Server\n\t}\n'
+    printf '}\n'
+  } >"$PULSE_CADDY"
+  chmod 0644 "$PULSE_CADDY"
 }
 
 if [[ "$USE_SSL" == "yes" ]]; then
@@ -673,27 +761,10 @@ elif [[ "$USE_SSL" == "yes" ]]; then
   log "Configuring Caddy for https://$DOMAIN ..."
   install -d -m 0755 /etc/caddy /etc/caddy/conf.d
   PULSE_CADDY="/etc/caddy/conf.d/pulse.caddy"
-  {
-    printf '%s {\n' "$DOMAIN"
-    printf '\tencode gzip\n'
-    # The agent link is a gRPC bidirectional stream. Caddy terminates TLS and
-    # speaks h2c to Pulse for this path only; normal UI/SSE traffic stays on
-    # HTTP/1.1 and WebSocket remains available as a fallback.
-    printf '\t@pulse_grpc {\n'
-    printf '\t\tpath /pulse.agent.v1.AgentLink/*\n'
-    printf '\t\theader Content-Type application/grpc*\n'
-    printf '\t}\n'
-    printf '\thandle @pulse_grpc {\n'
-    printf '\t\treverse_proxy 127.0.0.1:%s {\n' "$PORT"
-    printf '\t\t\ttransport http {\n\t\t\t\tversions h2c 2\n\t\t\t}\n'
-    printf '\t\t}\n\t}\n'
-    printf '\thandle {\n'
-    printf '\t\treverse_proxy 127.0.0.1:%s {\n\t\t\tflush_interval -1\n\t\t}\n' "$PORT"
-    printf '\t}\n'
-    printf '\theader {\n\t\t-Server\n\t}\n'
-    printf '}\n'
-  } >"$PULSE_CADDY"
-  chmod 0644 "$PULSE_CADDY"
+  # Prefer h2c for the gRPC agent link. If this Caddy is too old to understand
+  # the transport block, validation below rewrites the site without it and the
+  # agent uses its WebSocket/REST fallbacks instead.
+  write_pulse_caddy 1
 
   if [[ -f /etc/caddy/Caddyfile ]]; then
     cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak-$(date +%Y%m%d-%H%M%S)" || true
@@ -709,6 +780,11 @@ elif [[ "$USE_SSL" == "yes" ]]; then
     } >/etc/caddy/Caddyfile
   fi
   chmod 0644 /etc/caddy/Caddyfile
+
+  if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 && grep -q 'versions h2c' "$PULSE_CADDY"; then
+    warn "This Caddy rejected the h2c transport block; retrying with the WebSocket-compatible config."
+    write_pulse_caddy 0
+  fi
 
   if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
     open_firewall

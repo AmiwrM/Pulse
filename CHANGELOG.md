@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.1
+
+- The installer (panel and agent) now waits for the apt/dpkg lock instead of
+  aborting when `unattended-upgrades`, `cloud-init` or another install is
+  running. Locks are waited on for up to 10 minutes and failed package
+  operations are retried; a clear error is printed only if apt is really broken.
+- The panel installer verifies the Caddy version and installs Caddy 2.6+ from
+  the official repository when the distribution package is too old. If the
+  installed Caddy still rejects the `h2c` transport, the installer now writes a
+  WebSocket-compatible site automatically, so automatic HTTPS keeps working and
+  agents use the WebSocket/REST fallbacks.
+- Added Ubuntu 20.04 and Debian 11 to the supported install targets; the older
+  distro Caddy package no longer blocks the installation.
+
 ## 1.6.0
 
 - Added a full **English** UI with an EN/FA toggle, automatic LTR layout,

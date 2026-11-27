@@ -13,7 +13,7 @@
 #     --name vps-1
 #
 # Optional:
-#   --release v1.6.0      Release tag (default: latest)
+#   --release v1.6.1      Release tag (default: latest)
 #   --binary PATH         Use a local pulse-linux-ARCH binary
 #   --binary-url URL      Download the binary from a custom URL
 #   --services xray,wg    systemd services to report
@@ -25,7 +25,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.6.0"
+INSTALLER_VERSION="1.6.1"
 REPO_SLUG="${PULSE_REPO:-AmiwrM/Pulse}"
 REPO_URL="https://github.com/${REPO_SLUG}"
 
@@ -50,6 +50,22 @@ PULSE_XRAY_PATH="${PULSE_XRAY_PATH:-/usr/local/lib/pulse/xray}"
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# apt/dpkg can be busy with unattended-upgrades or another install.
+apt_get() {
+  local attempt
+  for attempt in 1 2 3; do
+    if DEBIAN_FRONTEND=noninteractive apt-get \
+      -o DPkg::Lock::Timeout=180 \
+      -o Acquire::Retries=3 \
+      "$@"; then
+      return 0
+    fi
+    warn "apt-get $* failed (attempt ${attempt}/3); another package manager may be running. Retrying in 5s..."
+    sleep 5
+  done
+  return 1
+}
 
 usage() {
   cat <<HELP
@@ -113,9 +129,9 @@ case "$ARCH" in
 esac
 
 command -v apt-get >/dev/null 2>&1 || die "This installer supports Debian/Ubuntu (apt-get not found)."
-log "Installing system dependencies..."
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl unzip tar gzip coreutils iputils-ping >/dev/null
+log "Installing system dependencies (waiting for any apt/dpkg lock)..."
+apt_get update -qq
+apt_get install -y -qq ca-certificates curl unzip tar gzip coreutils iputils-ping >/dev/null
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

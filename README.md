@@ -10,7 +10,13 @@
 
 **ریپازیتوری:** <https://github.com/AmiwrM/Pulse>
 
-### خلاصهٔ نسخهٔ 1.6.0
+### خلاصهٔ نسخهٔ 1.6.1
+
+- نصب‌کنندهٔ پنل و ایجنت حالا منتظر قفل apt/dpkg می‌ماند (تا ۱۰ دقیقه) و عملیات را دوباره تلاش می‌کند؛ اجرای هم‌زمان `unattended-upgrades` یا `cloud-init` دیگر نصب را متوقف نمی‌کند.
+- نصب‌کننده نسخهٔ Caddy را بررسی می‌کند و در صورت قدیمی‌بودن، Caddy 2.6+ را از مخزن رسمی نصب می‌کند؛ اگر Caddy قدیمی `h2c` را نپذیرد، کانفیگ WebSocket جایگزین نوشته می‌شود تا HTTPS و اتصال ایجنت از کار نیفتد.
+- پشتیبانی از Ubuntu 20.04 و Debian 11 به فهرست سیستم‌های پشتیبانی‌شده اضافه شد.
+
+### امکانات کلیدی نسخهٔ 1.6
 
 - **زبان انگلیسی** با دکمهٔ EN/FA، چیدمان خودکار LTR/RTL، تاریخ/عدد انگلیسی و ترجمهٔ کل رابط. انتخاب زبان در مرورگر ذخیره می‌شود.
 - **لاگ‌های تفکیک‌شده**: صفحهٔ لاگ با دسته‌های پنل، زمان‌بند، مانیتور، Xray، کلادفلر، اعلان‌ها، ایجنت، امنیت و API؛ ذخیره در SQLite، حفظ ۱۴ روز/۲۰٬۰۰۰ رکورد و فرمان `pulse logs` با فیلتر.
@@ -78,7 +84,7 @@
 
 ## نصب سریع روی VPS
 
-روی **Debian 12 / Ubuntu 22.04 / Ubuntu 24.04** با دسترسی root. پیشنهاد می‌شود اسکریپت را اول دانلود و بعد اجرا کنید:
+روی **Debian 11 / 12 و Ubuntu 20.04 / 22.04 / 24.04** با دسترسی root. پیشنهاد می‌شود اسکریپت را اول دانلود و بعد اجرا کنید:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh -o /tmp/pulse-install.sh
@@ -137,8 +143,8 @@ curl -fsSL https://raw.githubusercontent.com/AmiwrM/Pulse/main/install.sh | sudo
 اولین نصب اگر هنوز Release نداشته باشید، به‌صورت خودکار از سورس می‌سازد. بعد از اولین push، یک تگ بسازید تا GitHub Actions باینری‌های لینوکس را برای نصب‌های بعدی آماده کند:
 
 ```bash
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.6.1
+git push origin v1.6.1
 ```
 
 خروجی workflow: `pulse-linux-amd64`، `pulse-linux-arm64` و `SHA256SUMS`. نصب‌کننده از این فایل‌ها استفاده می‌کند. اگر ریلیز موجود نباشد یا GitHub در دسترس نباشد، با `--source` یا `--binary`/`--binary-url` می‌توانید مسیر دیگری انتخاب کنید.
@@ -151,7 +157,7 @@ git push origin v1.6.0
 sudo bash /tmp/pulse-install.sh --help
 
 # نسخهٔ مشخص از ریلیز
-sudo bash /tmp/pulse-install.sh --release v1.6.0 --domain status.example.com --yes
+sudo bash /tmp/pulse-install.sh --release v1.6.1 --domain status.example.com --yes
 
 # ساخت از سورس (مثلاً قبل از انتشار اولین ریلیز)
 sudo bash /tmp/pulse-install.sh --source --domain status.example.com --yes
@@ -166,6 +172,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 - پورت‌های **80 و 443** باید از سمت فایروال ارائه‌دهنده نیز باز باشند.
 - اگر دامنه در Cloudflare با ابر نارنجی (Proxied) است، برای صدور گواهی اولیه آن را روی **DNS only** بگذارید؛ بعد از صدور می‌توانید Proxied کنید (Caddy از HTTP-01 استفاده می‌کند).
 - اگر نصب Caddy ممکن نشود، اسکریپت در حالت تعاملی اجازه می‌دهد بدون HTTPS ادامه دهید؛ در حالت غیرتعاملی متوقف می‌شود تا پنل ناخواسته روی HTTP عمومی قرار نگیرد.
+- نصب‌کننده Caddy 2.6+ را برای مسیر gRPC با `h2c` ترجیح می‌دهد. اگر Caddy قدیمی‌تر باشد و بلوک `h2c` را نپذیرد، کانفیگ WebSocket نوشته می‌شود و اتصال ایجنت با WebSocket/REST ادامه می‌یابد.
 - روی نصب موجود، اگر دامنه را عوض کردید، آدرس عمومی را در **تنظیمات** هم به‌روز کنید؛ مقدار ذخیره‌شده در پنل بر مقدار اولیهٔ محیط اولویت دارد.
 
 > نصب مجدد/ارتقا با همان اسکریپت انجام می‌شود. قبل از جایگزینی باینری از دیتابیس قبلی در `/var/backups` نسخهٔ پشتیبان گرفته می‌شود و حساب مدیریت موجود بازنویسی نمی‌شود. برای ریسک کمتر، از دکمهٔ پشتیبان‌گیری پنل هم استفاده کنید.
@@ -180,7 +187,7 @@ sudo bash /tmp/pulse-install.sh --binary /root/pulse-linux-amd64 --domain status
 # پنل
 pulse start | stop | restart | status
 pulse logs [--lines N] [--follow] [--category monitor] [--level warn]
-pulse update [--release v1.6.0] [--no-restart]
+pulse update [--release v1.6.1] [--no-restart]
 pulse port                       # نمایش پورت فعلی
 pulse port 8090                  # تغییر پورت پنل + Caddy و ری‌استارت
 pulse uninstall [--purge] [--yes]
@@ -201,8 +208,8 @@ pulse-agent version
 `pulse update` و `pulse-agent update` باینری را از آخرین Release رسمی دانلود می‌کنند، SHA256 را بررسی می‌کنند، فایل را اتمیک جایگزین می‌کنند و سرویس را ری‌استارت می‌کنند. برای نسخهٔ مشخص:
 
 ```bash
-pulse update --release v1.6.0
-pulse-agent update --release v1.6.0
+pulse update --release v1.6.1
+pulse-agent update --release v1.6.1
 ```
 
 > برای اولین آپدیت از نسخهٔ قدیمی(source) که هنوز این دستور را ندارد، از بخش [آپدیت دستی](#آپدیت-دستی) استفاده کن. اگر هنوز Release نساخته‌ای، `pulse update` خطا می‌دهد و باید نسخه را با installer/سورس نصب کنی.
@@ -792,7 +799,7 @@ curl -X POST http://127.0.0.1:8080/api/monitors \
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `PULSE_VERSION` | `1.6.0` | نسخهٔ تصویر |
+| `PULSE_VERSION` | `1.6.1` | نسخهٔ تصویر |
 | `XRAY_VERSION` | `v26.11.9` | نسخهٔ Xray داخل تصویر |
 | `XRAY_DOWNLOAD_URL` | — | آدرس آینهٔ فایل ZIP برای دور زدن محدودیت GitHub |
 | `GOPROXY` | `https://proxy.golang.org,direct` | آینهٔ ماژول‌های Go |
@@ -831,8 +838,8 @@ XRAY_BIN=/usr/local/bin/xray go test ./internal/xray -run TestRealHandshake -v
 با push یک تگ `v*`، workflow موجود در `.github/workflows/release.yml` باینری‌های لینوکس amd64/arm64 و فایل `SHA256SUMS` را می‌سازد و به GitHub Release اضافه می‌کند. نصب‌کننده همان فایل‌ها را روی سرور دانلود می‌کند:
 
 ```bash
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.6.1
+git push origin v1.6.1
 ```
 
 ---
@@ -841,6 +848,7 @@ git push origin v1.6.0
 
 | مشکل | راه‌حل |
 |---|---|
+| نصب با خطای `Could not get lock /var/lib/dpkg/lock-frontend` متوقف می‌شود | نسخهٔ 1.6.1+ خودش تا ۱۰ دقیقه منتظر قفل می‌ماند و دوباره تلاش می‌کند. اگر باز هم تکرار شد: `sudo systemctl stop unattended-upgrades`، سپس `sudo dpkg --configure -a` و `sudo apt-get -f install` را اجرا و نصب را دوباره شروع کنید. |
 | Ping خطای دسترسی می‌دهد | در Docker: `cap_add: NET_RAW`. در systemd: `AmbientCapabilities=CAP_NET_RAW` یا `sudo setcap cap_net_raw+ep $(which ping)`. |
 | Web Push روی آیفون کار نمی‌کند | پنل باید HTTPS باشد و از صفحهٔ اصلی (PWA) باز شود، نه تب Safari. iOS 16.4+. |
 | تلگرام پیام نمی‌فرستد | توکن را تست کنید؛ ربات را در کانال ادمین کنید؛ Chat ID را بررسی کنید. طبق قوانین تلگرام، ربات تا زمانی که کاربر به آن پیام نداده نمی‌تواند شروع کند. |
